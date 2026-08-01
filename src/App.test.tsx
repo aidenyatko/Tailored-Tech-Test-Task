@@ -42,6 +42,35 @@ describe("App", () => {
     await user.upload(input, secondFile);
 
     expect(await screen.findByText("Report (1).pdf")).toBeInTheDocument();
+
+    await user.click(screen.getByText("Report.pdf"));
+    expect(await screen.findByTitle("PDF preview for Report.pdf")).toBeInTheDocument();
+  });
+
+  it("filters files and folders by name", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "New data room" }));
+    await user.type(screen.getByLabelText("Name"), "Acme Deal");
+    await user.click(screen.getByRole("button", { name: "Create" }));
+    await user.click(screen.getByRole("button", { name: "New folder" }));
+    await user.clear(screen.getByLabelText("Name"));
+    await user.type(screen.getByLabelText("Name"), "Financials");
+    await user.click(screen.getByRole("button", { name: "Create" }));
+
+    const input = await screen.findByTestId("pdf-upload");
+    await user.upload(input, new File(["%PDF-1.4"], "Report.pdf", { type: "application/pdf" }));
+
+    await user.type(screen.getByLabelText("Search documents"), "report");
+
+    expect(await screen.findByText("Report.pdf")).toBeInTheDocument();
+    expect(screen.queryByText("Financials")).not.toBeInTheDocument();
+
+    await user.clear(screen.getByLabelText("Search documents"));
+    await user.type(screen.getByLabelText("Search documents"), "missing");
+
+    expect(await screen.findByText("No items match your search.")).toBeInTheDocument();
   });
 
   it("deletes a folder from the current data room", async () => {
