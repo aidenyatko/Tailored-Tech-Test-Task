@@ -2,7 +2,11 @@ import { DataRoomError } from "./errors";
 import type { DataRoomItem, EntityId, FileItem, FolderItem } from "./types";
 
 export function getItemsByParent(items: DataRoomItem[], parentId: EntityId | null) {
-  return items.filter((item) => item.parentId === parentId).sort(compareItems);
+  return sortDataRoomItems(items.filter((item) => item.parentId === parentId));
+}
+
+export function sortDataRoomItems(items: DataRoomItem[]) {
+  return [...items].sort(compareItems);
 }
 
 export function getFolderDescendantIds(items: DataRoomItem[], folderId: EntityId) {

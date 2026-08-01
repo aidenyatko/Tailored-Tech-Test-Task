@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DataRoomError } from "../domain/errors";
-import { getBreadcrumbs, getItemsByParent } from "../domain/tree";
+import { getBreadcrumbs, getItemsByParent, sortDataRoomItems } from "../domain/tree";
 import type { DataRoomItem, Dataroom, EntityId, FileItem } from "../domain/types";
 import { DataRoomStorage } from "../storage/dataRoomStorage";
 
@@ -17,6 +17,9 @@ export function useDataroomWorkspace() {
   const [selectedDataroomId, setSelectedDataroomId] = useState<EntityId | null>(null);
   const [currentParentId, setCurrentParentId] = useState<EntityId | null>(null);
   const [selectedFileId, setSelectedFileId] = useState<EntityId | null>(null);
+  const [selectedFileUrl, setSelectedFileUrl] = useState<string | null>(null);
+  const [isPreviewLoading, setIsPreviewLoading] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   const [notice, setNotice] = useState<WorkspaceNotice | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -53,6 +56,16 @@ export function useDataroomWorkspace() {
 
   const currentItems = useMemo(() => getItemsByParent(items, currentParentId), [currentParentId, items]);
 
+  const visibleItems = useMemo(() => {
+    const query = searchQuery.trim().toLocaleLowerCase();
+
+    if (!query) {
+      return currentItems;
+    }
+
+    return sortDataRoomItems(items.filter((item) => item.name.toLocaleLowerCase().includes(query)));
+  }, [currentItems, items, searchQuery]);
+
   const breadcrumbs = useMemo(() => {
     if (!currentParentId) {
       return [];
@@ -65,6 +78,48 @@ export function useDataroomWorkspace() {
     () => items.find((item): item is FileItem => item.id === selectedFileId && item.type === "file") ?? null,
     [items, selectedFileId]
   );
+
+  useEffect(() => {
+    let isCancelled = false;
+    let objectUrl: string | null = null;
+
+    setSelectedFileUrl(null);
+
+    if (!selectedFile) {
+      setIsPreviewLoading(false);
+      return undefined;
+    }
+
+    setIsPreviewLoading(true);
+
+    storage.current
+      .getFileBlob(selectedFile.storageKey)
+      .then((blob) => {
+        if (isCancelled || !blob) {
+          return;
+        }
+
+        objectUrl = URL.createObjectURL(blob);
+        setSelectedFileUrl(objectUrl);
+      })
+      .catch((error: unknown) => {
+        if (!isCancelled) {
+          setNotice({ tone: "error", message: getErrorMessage(error) });
+        }
+      })
+      .finally(() => {
+        if (!isCancelled) {
+          setIsPreviewLoading(false);
+        }
+      });
+
+    return () => {
+      isCancelled = true;
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
+  }, [selectedFile]);
 
   const run = useCallback(
     async (operation: () => Promise<void>, successMessage?: string) => {
@@ -194,18 +249,24 @@ export function useDataroomWorkspace() {
     deleteDataroom,
     deleteItem,
     isLoading,
+    isPreviewLoading,
+    isSearchActive: Boolean(searchQuery.trim()),
     items,
     notice,
     openFolder,
     renameDataroom,
     renameItem,
+    searchQuery,
     selectDataroom,
     selectedDataroom,
     selectedFile,
     selectedFileId,
+    selectedFileUrl,
     setNotice,
+    setSearchQuery,
     setSelectedFileId,
-    uploadFiles
+    uploadFiles,
+    visibleItems
   };
 }
 

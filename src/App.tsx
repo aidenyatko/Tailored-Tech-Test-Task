@@ -1,14 +1,17 @@
 import {
   ChevronRight,
   Database,
+  ExternalLink,
   FileText,
   Folder,
   FolderOpen,
   Home,
   Pencil,
   Plus,
+  Search,
   Trash2,
-  Upload
+  Upload,
+  X
 } from "lucide-react";
 import { ChangeEvent, ReactNode, useRef, useState } from "react";
 import { WorkspaceDialog } from "./components/WorkspaceDialog";
@@ -170,6 +173,27 @@ export function App() {
               </div>
 
               <div className="flex flex-wrap gap-2">
+                <label className="relative min-w-[220px] flex-1 xl:min-w-[280px]">
+                  <span className="sr-only">Search documents</span>
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-steel" />
+                  <input
+                    className="h-10 w-full rounded border border-mist bg-white pl-9 pr-10 text-sm outline-none transition placeholder:text-steel/70 focus:border-accent focus:ring-2 focus:ring-accent/20"
+                    onChange={(event) => workspace.setSearchQuery(event.target.value)}
+                    placeholder="Search documents"
+                    value={workspace.searchQuery}
+                  />
+                  {workspace.searchQuery ? (
+                    <button
+                      aria-label="Clear search"
+                      className="absolute right-2 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded text-steel transition hover:bg-paper"
+                      onClick={() => workspace.setSearchQuery("")}
+                      title="Clear search"
+                      type="button"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  ) : null}
+                </label>
                 <button
                   className="inline-flex items-center gap-2 rounded border border-mist bg-white px-3 py-2 text-sm font-medium text-ink transition hover:bg-paper disabled:cursor-not-allowed disabled:opacity-50"
                   disabled={!workspace.selectedDataroom}
@@ -229,13 +253,21 @@ export function App() {
                   <div className="p-8 text-center text-sm text-steel">Loading data room...</div>
                 ) : null}
 
-                {!workspace.isLoading && workspace.selectedDataroom && workspace.currentItems.length === 0 ? (
+                {!workspace.isLoading && workspace.selectedDataroom && workspace.visibleItems.length === 0 ? (
                   <div className="grid min-h-[280px] place-items-center p-8 text-center">
                     <div>
-                      <FolderOpen className="mx-auto h-10 w-10 text-accent" />
-                      <p className="mt-4 text-base font-semibold">This folder is empty.</p>
+                      {workspace.isSearchActive ? (
+                        <Search className="mx-auto h-10 w-10 text-accent" />
+                      ) : (
+                        <FolderOpen className="mx-auto h-10 w-10 text-accent" />
+                      )}
+                      <p className="mt-4 text-base font-semibold">
+                        {workspace.isSearchActive ? "No items match your search." : "This folder is empty."}
+                      </p>
                       <p className="mt-2 text-sm leading-6 text-steel">
-                        Add a folder or upload PDF files to start building the data room.
+                        {workspace.isSearchActive
+                          ? "Try a different file or folder name."
+                          : "Add a folder or upload PDF files to start building the data room."}
                       </p>
                     </div>
                   </div>
@@ -260,9 +292,9 @@ export function App() {
                   </div>
                 ) : null}
 
-                {!workspace.isLoading && workspace.currentItems.length > 0 ? (
+                {!workspace.isLoading && workspace.visibleItems.length > 0 ? (
                   <div className="divide-y divide-mist">
-                    {workspace.currentItems.map((item) => (
+                    {workspace.visibleItems.map((item) => (
                       <ExplorerRow
                         isSelected={workspace.selectedFileId === item.id}
                         item={item}
@@ -291,9 +323,47 @@ export function App() {
                     <Detail label="Size" value={formatBytes(workspace.selectedFile.size)} />
                     <Detail label="Updated" value={formatDateTime(workspace.selectedFile.updatedAt)} />
                   </dl>
-                  <p className="mt-6 rounded border border-mist bg-paper p-3 text-sm leading-6 text-steel">
-                    PDF preview is added in the next feature branch. File metadata and storage are active now.
-                  </p>
+                  <div className="mt-5">
+                    {workspace.isPreviewLoading ? (
+                      <div className="grid h-[420px] place-items-center rounded border border-mist bg-paper text-sm text-steel">
+                        Loading PDF preview...
+                      </div>
+                    ) : null}
+                    {!workspace.isPreviewLoading && workspace.selectedFileUrl ? (
+                      <div>
+                        <object
+                          className="h-[420px] w-full rounded border border-mist bg-paper"
+                          data={workspace.selectedFileUrl}
+                          title={`PDF preview for ${workspace.selectedFile.name}`}
+                          type="application/pdf"
+                        >
+                          <a
+                            className="inline-flex items-center gap-2 rounded bg-accent px-3 py-2 text-sm font-semibold text-white"
+                            href={workspace.selectedFileUrl}
+                            rel="noreferrer"
+                            target="_blank"
+                          >
+                            Open PDF
+                            <ExternalLink className="h-4 w-4" />
+                          </a>
+                        </object>
+                        <a
+                          className="mt-3 inline-flex items-center gap-2 text-sm font-semibold text-accent"
+                          href={workspace.selectedFileUrl}
+                          rel="noreferrer"
+                          target="_blank"
+                        >
+                          Open PDF in browser
+                          <ExternalLink className="h-4 w-4" />
+                        </a>
+                      </div>
+                    ) : null}
+                    {!workspace.isPreviewLoading && !workspace.selectedFileUrl ? (
+                      <div className="rounded border border-mist bg-paper p-3 text-sm leading-6 text-steel">
+                        Preview is unavailable for this file.
+                      </div>
+                    ) : null}
+                  </div>
                 </div>
               ) : (
                 <div className="rounded border border-dashed border-mist bg-paper p-4 text-sm leading-6 text-steel">
