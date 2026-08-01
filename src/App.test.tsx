@@ -12,6 +12,7 @@ describe("App", () => {
     await user.click(await screen.findByRole("button", { name: "New data room" }));
     await user.type(screen.getByLabelText("Name"), "Acme Deal");
     await user.click(screen.getByRole("button", { name: "Create" }));
+    expect(await screen.findByRole("heading", { name: "Acme Deal" })).toBeInTheDocument();
 
     expect(await screen.findByRole("heading", { name: "Acme Deal" })).toBeInTheDocument();
 
@@ -36,9 +37,10 @@ describe("App", () => {
     const secondFile = new File(["%PDF-1.4"], "Report.pdf", { type: "application/pdf" });
 
     await user.upload(input, firstFile);
+    expect(await screen.findByText("Report.pdf")).toBeInTheDocument();
+
     await user.upload(input, secondFile);
 
-    expect(await screen.findByText("Report.pdf")).toBeInTheDocument();
     expect(await screen.findByText("Report (1).pdf")).toBeInTheDocument();
   });
 
