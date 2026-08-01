@@ -136,7 +136,7 @@ export class DataRoomStorage {
     const safeName = createUniqueName(file.name, getSiblingNames(items, dataroomId, parentId));
     const now = new Date().toISOString();
     const storageKey = crypto.randomUUID();
-    const data = await file.arrayBuffer();
+    const data = await readFileAsArrayBuffer(file);
     const item: FileItem = {
       id: crypto.randomUUID(),
       dataroomId,
@@ -238,4 +238,17 @@ export class DataRoomStorage {
 
     return dataroom;
   }
+}
+
+function readFileAsArrayBuffer(file: File) {
+  if (typeof file.arrayBuffer === "function") {
+    return file.arrayBuffer();
+  }
+
+  return new Promise<ArrayBuffer>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener("load", () => resolve(reader.result as ArrayBuffer));
+    reader.addEventListener("error", () => reject(reader.error));
+    reader.readAsArrayBuffer(file);
+  });
 }
