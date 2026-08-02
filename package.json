@@ -7,6 +7,7 @@
     "dev": "vite --host 0.0.0.0",
     "backend:build": "tsc -p tsconfig.server.json",
     "backend:generate": "prisma generate",
+    "frontend:build": "tsc -b && vite build",
     "build": "npm run backend:generate && npm run backend:build && tsc -b && vite build",
     "lint": "eslint .",
     "migrate:deploy": "prisma migrate deploy",

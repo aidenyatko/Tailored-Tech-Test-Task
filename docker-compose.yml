@@ -1,4 +1,27 @@
 services:
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    depends_on:
+      - backend
+    ports:
+      - "8080:8080"
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    depends_on:
+      - postgres
+    environment:
+      DATABASE_URL: postgresql://dataroom:dataroom@postgres:5432/dataroom?schema=public
+      UPLOAD_DIR: /app/uploads
+    expose:
+      - "8080"
+    volumes:
+      - upload-data:/app/uploads
+
   postgres:
     image: postgres:16-alpine
     environment:
@@ -9,21 +32,6 @@ services:
       - "5438:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
-
-  app:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    depends_on:
-      - postgres
-    environment:
-      DATABASE_URL: postgresql://dataroom:dataroom@postgres:5432/dataroom?schema=public
-      UPLOAD_DIR: /app/uploads
-      PUBLIC_ROOT: /app/dist
-    ports:
-      - "8080:8080"
-    volumes:
-      - upload-data:/app/uploads
 
 volumes:
   postgres-data:
