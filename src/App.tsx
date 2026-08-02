@@ -1,28 +1,35 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import * as Select from "@radix-ui/react-select";
-import * as Tabs from "@radix-ui/react-tabs";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { flexRender, getCoreRowModel, useReactTable } from "@tanstack/react-table";
 import {
+  ArrowLeft,
   ChevronDown,
   ChevronRight,
   Database,
   Eye,
   FileText,
   Folder,
+  Grid3X3,
+  HardDrive,
   Home,
+  Info,
+  List,
   LogOut,
   Maximize2,
   MoveRight,
   Pencil,
   Plus,
   Search,
+  Settings,
   Shield,
+  Sparkles,
   Trash2,
   Upload,
+  Users,
   X
 } from "lucide-react";
-import { ChangeEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, MouseEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import {
   createDataroom,
   createFolder,
@@ -43,7 +50,7 @@ import {
   updateAccess,
   uploadFiles
 } from "./api/client";
-import type { Dataroom, DataroomItem, DataroomRole, FileItem } from "./api/types";
+import type { AccessRecord, Dataroom, DataroomItem, DataroomRole, FileItem } from "./api/types";
 import { formatBytes, formatDateTime } from "./lib/format";
 
 type DialogState =
@@ -57,6 +64,7 @@ type DialogState =
   | null;
 
 type Notice = { tone: "success" | "error"; message: string } | null;
+type ContextMenuState = { x: number; y: number; dataroom: Dataroom } | null;
 
 export function App() {
   const queryClient = useQueryClient();
@@ -69,6 +77,22 @@ export function App() {
   const [dialog, setDialog] = useState<DialogState>(null);
   const [notice, setNotice] = useState<Notice>(null);
   const [viewerOpen, setViewerOpen] = useState(false);
+  const [accessDialogOpen, setAccessDialogOpen] = useState(false);
+  const [contextMenu, setContextMenu] = useState<ContextMenuState>(null);
+
+  useEffect(() => {
+    if (!contextMenu) {
+      return;
+    }
+
+    const close = () => setContextMenu(null);
+    window.addEventListener("click", close);
+    window.addEventListener("keydown", close);
+    return () => {
+      window.removeEventListener("click", close);
+      window.removeEventListener("keydown", close);
+    };
+  }, [contextMenu]);
 
   const meQuery = useQuery({
     queryKey: ["me", token],
@@ -86,6 +110,8 @@ export function App() {
   const datarooms = dataroomsQuery.data?.datarooms ?? [];
   const selectedDataroom = datarooms.find((room) => room.id === selectedDataroomId) ?? datarooms[0] ?? null;
   const activeDataroomId = selectedDataroom?.id ?? null;
+  const canEdit = selectedDataroom?.role === "OWNER" || selectedDataroom?.role === "EDITOR";
+  const canManageAccess = selectedDataroom?.role === "OWNER";
 
   const allItemsQuery = useQuery({
     queryKey: ["items", token, activeDataroomId, ""],
@@ -99,16 +125,43 @@ export function App() {
     enabled: Boolean(token && activeDataroomId)
   });
 
+  const accessQuery = useQuery({
+    queryKey: ["access", token, activeDataroomId],
+    queryFn: () => listAccess(token ?? "", activeDataroomId ?? ""),
+    enabled: Boolean(token && activeDataroomId && canManageAccess)
+  });
+
+  const usersQuery = useQuery({
+    queryKey: ["users", token],
+    queryFn: () => listUsers(token ?? ""),
+    enabled: Boolean(token && accessDialogOpen && canManageAccess)
+  });
+
   const allItems = useMemo(() => allItemsQuery.data?.items ?? [], [allItemsQuery.data?.items]);
   const serverVisibleItems = useMemo(() => visibleItemsQuery.data?.items ?? [], [visibleItemsQuery.data?.items]);
   const visibleItems = searchQuery.trim()
     ? serverVisibleItems
     : serverVisibleItems.filter((item) => item.parentId === currentParentId);
   const selectedFile = allItems.find((item): item is FileItem => item.id === selectedFileId && item.type === "FILE") ?? null;
+  const currentFolder = currentParentId ? allItems.find((item) => item.id === currentParentId) ?? null : null;
+  const selectedAddress = useMemo(
+    () => buildAddress(
+      selectedDataroom,
+      allItems,
+      selectedFile?.parentId ?? currentParentId,
+      selectedFile,
+      () => {
+        setCurrentParentId(null);
+        setSelectedFileId(null);
+      },
+      (folderId) => {
+        setCurrentParentId(folderId);
+        setSelectedFileId(null);
+      }
+    ),
+    [allItems, currentParentId, selectedDataroom, selectedFile]
+  );
   const currentUser = meQuery.data?.user ?? null;
-  const canEdit = selectedDataroom?.role === "OWNER" || selectedDataroom?.role === "EDITOR";
-  const canManageAccess = selectedDataroom?.role === "OWNER";
-  const breadcrumbs = useMemo(() => buildBreadcrumbs(allItems, currentParentId), [allItems, currentParentId]);
   const fileUrl = selectedFile && token ? fileContentUrl(selectedFile.id, token) : null;
 
   const refreshWorkspace = async () => {
@@ -159,6 +212,14 @@ export function App() {
     () => deleteItem(token ?? "", dialog?.type === "delete-item" ? dialog.item.id : ""),
     "Item deleted."
   ));
+  const accessMutation = useMutation({
+    mutationFn: ({ userId, role }: { userId: string; role: DataroomRole | null }) => updateAccess(token ?? "", activeDataroomId ?? "", userId, role),
+    onSuccess: async () => {
+      setNotice({ tone: "success", message: "Access updated." });
+      await queryClient.invalidateQueries({ queryKey: ["access"] });
+    },
+    onError: (error: Error) => setNotice({ tone: "error", message: error.message })
+  });
 
   async function handleUpload(event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files ?? []);
@@ -186,176 +247,210 @@ export function App() {
     void queryClient.clear();
   }
 
+  function selectDataroom(room: Dataroom) {
+    setSelectedDataroomId(room.id);
+    setCurrentParentId(null);
+    setSelectedFileId(null);
+    setSearchQuery("");
+  }
+
+  function openDataroomContextMenu(event: MouseEvent, room: Dataroom) {
+    event.preventDefault();
+    selectDataroom(room);
+    setContextMenu({ x: event.clientX, y: event.clientY, dataroom: room });
+  }
+
   if (!token || !currentUser) {
     return <LoginScreen notice={notice} onLogin={(email, password) => loginMutation.mutate({ email, password })} />;
   }
 
   return (
     <main className="min-h-screen bg-void text-ghost">
-      <div className="grid min-h-screen grid-cols-[280px_1fr] max-lg:grid-cols-1">
-        <aside className="border-r border-neon-yellow/20 bg-panel/95 p-4 shadow-panel max-lg:border-b max-lg:border-r-0">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-xs font-black uppercase tracking-[0.18em] text-neon-yellow">Acme Corp.</p>
-              <h1 className="mt-1 text-xl font-semibold">Data Room</h1>
-              <p className="mt-1 text-xs text-ghost/60">{currentUser.name}</p>
-            </div>
-            <IconButton label="Sign out" onClick={handleLogout}>
-              <LogOut className="h-4 w-4" />
-            </IconButton>
-          </div>
+      <div className="flex min-h-screen flex-col">
+        <TopBar currentUserName={currentUser.name} onLogout={handleLogout} searchQuery={searchQuery} setSearchQuery={setSearchQuery} />
 
-          <button className="mt-6 w-full rounded-sm bg-neon-yellow px-4 py-2 text-sm font-black text-black hover:bg-neon-lime" onClick={() => setDialog({ type: "create-dataroom" })} type="button">
-            <Plus className="mr-2 inline h-4 w-4" />
-            New data room
-          </button>
+        <div className="grid flex-1 grid-cols-[248px_minmax(0,1fr)] max-lg:grid-cols-1">
+          <aside className="bg-panel/80 px-3 py-4 max-lg:hidden">
+            <button className="mb-5 flex h-14 items-center gap-3 rounded-3xl bg-neon-yellow px-5 text-sm font-black text-black shadow-panel hover:bg-neon-lime" onClick={() => setDialog({ type: "create-dataroom" })} type="button">
+              <Plus className="h-5 w-5" />
+              Create
+            </button>
 
-          <div className="mt-5 space-y-1">
-            {datarooms.map((room) => (
-              <button
-                className={classNames(
-                  "flex w-full items-center gap-3 rounded-sm border px-3 py-2 text-left text-sm transition",
-                  selectedDataroom?.id === room.id
-                    ? "border-neon-yellow bg-neon-yellow/10 text-neon-yellow"
-                    : "border-transparent text-ghost/75 hover:border-neon-cyan/40 hover:bg-neon-cyan/5 hover:text-ghost"
-                )}
-                key={room.id}
-                onClick={() => {
-                  setSelectedDataroomId(room.id);
-                  setCurrentParentId(null);
-                  setSelectedFileId(null);
-                }}
-                type="button"
-              >
-                <Database className="h-4 w-4 shrink-0" />
-                <span className="min-w-0 flex-1 truncate">{room.name}</span>
-                <RoleBadge role={room.role} />
-              </button>
-            ))}
-          </div>
-        </aside>
+            <nav className="space-y-1 text-sm">
+              <SideNavItem active icon={<Users className="h-5 w-5" />} label="Available to me" />
+              <SideNavItem icon={<Home className="h-5 w-5" />} label="My drive" />
+              <SideNavItem icon={<HardDrive className="h-5 w-5" />} label="Computers" />
+              <SideNavItem icon={<Sparkles className="h-5 w-5" />} label="Starred" />
+            </nav>
 
-        <section className="flex min-w-0 flex-col">
-          <header className="border-b border-neon-yellow/20 bg-panel px-5 py-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-1 text-sm text-ghost/60">
-                  <button className="inline-flex items-center gap-1 rounded-sm px-2 py-1 text-neon-cyan hover:bg-neon-cyan/10" onClick={() => setCurrentParentId(null)} type="button">
-                    <Home className="h-4 w-4" />
-                    My Drive
+            <div className="mt-6 border-t border-neon-cyan/15 pt-4">
+              <p className="px-3 text-xs font-black uppercase tracking-[0.16em] text-neon-yellow">Data rooms</p>
+              <div className="mt-3 space-y-1">
+                {datarooms.map((room) => (
+                  <button
+                    className={classNames(
+                      "group flex w-full items-center gap-3 rounded-3xl px-3 py-2 text-left text-sm transition",
+                      selectedDataroom?.id === room.id
+                        ? "bg-neon-yellow/15 text-neon-yellow"
+                        : "text-ghost/75 hover:bg-neon-cyan/10 hover:text-ghost"
+                    )}
+                    key={room.id}
+                    onClick={() => selectDataroom(room)}
+                    onContextMenu={(event) => openDataroomContextMenu(event, room)}
+                    type="button"
+                  >
+                    <Database className="h-4 w-4 shrink-0" />
+                    <span className="min-w-0 flex-1 truncate">{room.name}</span>
+                    <RoleBadge role={room.role} />
                   </button>
-                  {breadcrumbs.map((folder) => (
-                    <span className="inline-flex items-center gap-1" key={folder.id}>
-                      <ChevronRight className="h-4 w-4" />
-                      <button className="rounded-sm px-2 py-1 text-neon-cyan hover:bg-neon-cyan/10" onClick={() => setCurrentParentId(folder.id)} type="button">
-                        {folder.name}
-                      </button>
-                    </span>
-                  ))}
-                </div>
-                <h2 className="mt-2 truncate text-2xl font-semibold">{selectedDataroom?.name ?? "No data room selected"}</h2>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2">
-                <label className="relative w-[320px] max-sm:w-full">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neon-cyan" />
-                  <input className="h-10 w-full rounded-sm border border-neon-cyan/30 bg-void pl-9 pr-9 text-sm outline-none focus:border-neon-yellow" onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search names and PDF contents" value={searchQuery} />
-                  {searchQuery ? (
-                    <button aria-label="Clear search" className="absolute right-2 top-1/2 -translate-y-1/2 text-ghost/60" onClick={() => setSearchQuery("")} type="button">
-                      <X className="h-4 w-4" />
-                    </button>
-                  ) : null}
-                </label>
-                {canManageAccess ? (
-                  <AccessPanel dataroomId={activeDataroomId} token={token} />
-                ) : null}
-                <button className="rounded-sm border border-neon-cyan/30 px-3 py-2 text-sm font-semibold text-neon-cyan disabled:opacity-40" disabled={!canEdit} onClick={() => setDialog({ type: "create-folder" })} type="button">
-                  <Folder className="mr-2 inline h-4 w-4" />
-                  New folder
-                </button>
-                <button className="rounded-sm bg-neon-yellow px-3 py-2 text-sm font-black text-black disabled:opacity-40" disabled={!canEdit} onClick={() => fileInputRef.current?.click()} type="button">
-                  <Upload className="mr-2 inline h-4 w-4" />
-                  Upload PDF
-                </button>
-                <input accept="application/pdf" className="sr-only" data-testid="pdf-upload" multiple onChange={(event) => void handleUpload(event)} ref={fileInputRef} type="file" />
+                ))}
               </div>
             </div>
 
-            {notice ? (
-              <div className={classNames("mt-3 border px-3 py-2 text-sm", notice.tone === "error" ? "border-danger bg-danger/10 text-red-200" : "border-neon-cyan/40 bg-neon-cyan/10 text-neon-cyan")} role="status">
-                {notice.message}
-              </div>
-            ) : null}
-          </header>
+            <StorageMeter />
+          </aside>
 
-          <div className="grid flex-1 min-h-0 grid-cols-[1fr_340px] max-xl:grid-cols-1">
-            <section className="min-w-0 p-5">
-              <DriveTable
-                canEdit={canEdit}
-                items={visibleItems}
-                onDelete={(item) => setDialog({ type: "delete-item", item })}
-                onMove={(item) => setDialog({ type: "move-item", item })}
-                onOpen={(item) => {
-                  if (item.type === "FOLDER") {
-                    setCurrentParentId(item.id);
-                    setSelectedFileId(null);
-                    setSearchQuery("");
-                    return;
-                  }
-
-                  setSelectedFileId(item.id);
-                }}
-                onRename={(item) => setDialog({ type: "rename-item", item })}
-                selectedFileId={selectedFileId}
-              />
-            </section>
-
-            <aside className="border-l border-neon-yellow/20 bg-panel p-5 max-xl:border-l-0 max-xl:border-t">
-              <Tabs.Root defaultValue="details">
-                <Tabs.List className="grid grid-cols-2 border border-neon-cyan/20">
-                  <Tabs.Trigger className="px-3 py-2 text-sm data-[state=active]:bg-neon-cyan/15 data-[state=active]:text-neon-cyan" value="details">Details</Tabs.Trigger>
-                  <Tabs.Trigger className="px-3 py-2 text-sm data-[state=active]:bg-neon-cyan/15 data-[state=active]:text-neon-cyan" value="access">Access</Tabs.Trigger>
-                </Tabs.List>
-                <Tabs.Content className="mt-5" value="details">
-                  {selectedFile && fileUrl ? (
-                    <div>
-                      <div className="grid h-12 w-12 place-items-center bg-neon-yellow text-black">
-                        <FileText className="h-6 w-6" />
+          <section className="min-w-0 p-4 pl-0 max-lg:p-3">
+            <div className="grid h-full min-h-[calc(100vh-88px)] grid-cols-[minmax(0,1fr)_340px] overflow-hidden rounded-[32px] border border-neon-cyan/15 bg-panel shadow-panel max-2xl:grid-cols-[minmax(0,1fr)_310px] max-xl:grid-cols-1">
+              <div className="min-w-0 bg-void/35">
+                <section className="border-b border-neon-cyan/15 px-5 py-5">
+                  <div className="flex flex-wrap items-center justify-between gap-4">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2 text-sm text-ghost/60">
+                        {selectedAddress.map((part, index) => (
+                          <span className="inline-flex min-w-0 items-center gap-2" key={`${part.kind}-${part.id ?? "root"}-${index}`}>
+                            {index > 0 ? <ChevronRight className="h-4 w-4 shrink-0 text-ghost/35" /> : null}
+                            {part.clickable ? (
+                              <button className="truncate rounded-2xl px-2 py-1 text-neon-cyan hover:bg-neon-cyan/10" onClick={part.onClick} type="button">
+                                {part.label}
+                              </button>
+                            ) : (
+                              <span className="truncate rounded-2xl px-2 py-1 text-ghost">{part.label}</span>
+                            )}
+                          </span>
+                        ))}
                       </div>
-                      <h3 className="mt-4 break-words text-lg font-semibold">{selectedFile.name}</h3>
-                      <dl className="mt-5 space-y-4 text-sm">
-                        <Detail label="Type" value="PDF document" />
-                        <Detail label="Size" value={formatBytes(selectedFile.size)} />
-                        <Detail label="Updated" value={formatDateTime(selectedFile.updatedAt)} />
-                      </dl>
-                      <button className="mt-5 w-full rounded-sm bg-neon-yellow px-4 py-2 text-sm font-black text-black" onClick={() => setViewerOpen(true)} type="button">
-                        <Maximize2 className="mr-2 inline h-4 w-4" />
-                        Open in data room viewer
+
+                      <div className="mt-3 flex min-w-0 items-center gap-3">
+                        <h1 className="truncate text-2xl font-semibold">{selectedDataroom?.name ?? "No data room selected"}</h1>
+                        {selectedDataroom ? <ChevronDown className="h-5 w-5 text-ghost/45" /> : null}
+                        {selectedDataroom ? <Users className="h-5 w-5 text-neon-cyan" /> : null}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button className="grid h-10 w-10 place-items-center rounded-full bg-neon-cyan/15 text-neon-cyan" title="List view" type="button">
+                        <List className="h-5 w-5" />
                       </button>
-                      <iframe className="mt-4 h-[360px] w-full border border-neon-cyan/25 bg-black" src={fileUrl} title={`PDF preview for ${selectedFile.name}`} />
+                      <button className="grid h-10 w-10 place-items-center rounded-full border border-neon-cyan/20 text-ghost/70" title="Grid view" type="button">
+                        <Grid3X3 className="h-5 w-5" />
+                      </button>
+                      <button className="grid h-10 w-10 place-items-center rounded-full border border-neon-cyan/20 text-ghost/70" title="Details" type="button">
+                        <Info className="h-5 w-5" />
+                      </button>
                     </div>
-                  ) : (
-                    <EmptyPanel>Select a PDF file to preview it here.</EmptyPanel>
-                  )}
-                </Tabs.Content>
-                <Tabs.Content className="mt-5" value="access">
-                  {selectedDataroom ? (
-                    <div className="space-y-3 text-sm">
-                      <Detail label="Your role" value={selectedDataroom.role.toLowerCase()} />
-                      <Detail label="Owner" value={selectedDataroom.owner?.name ?? "Owner"} />
-                      <p className="leading-6 text-ghost/60">
-                        Owners manage access. Editors can change folders and files. Viewers can only read and preview.
-                      </p>
+                  </div>
+
+                  <div className="mt-5 flex flex-wrap items-center gap-2">
+                    {currentParentId ? (
+                      <button className="rounded-full border border-neon-cyan/30 px-4 py-2 text-sm font-semibold text-neon-cyan hover:bg-neon-cyan/10" onClick={() => {
+                        setCurrentParentId(currentFolder?.parentId ?? null);
+                        setSelectedFileId(null);
+                      }} type="button">
+                        <ArrowLeft className="mr-2 inline h-4 w-4" />
+                        Back
+                      </button>
+                    ) : null}
+                    <FilterButton label="Type" />
+                    <FilterButton label="People" />
+                    <FilterButton label="Modified" />
+                    <FilterButton label="Source" />
+                    <button className="ml-auto rounded-full border border-neon-cyan/30 px-4 py-2 text-sm font-semibold text-neon-cyan disabled:opacity-40 max-md:ml-0" disabled={!canEdit} onClick={() => setDialog({ type: "create-folder" })} type="button">
+                      <Folder className="mr-2 inline h-4 w-4" />
+                      New folder
+                    </button>
+                    <button className="rounded-full bg-neon-yellow px-4 py-2 text-sm font-black text-black disabled:opacity-40" disabled={!canEdit} onClick={() => fileInputRef.current?.click()} type="button">
+                      <Upload className="mr-2 inline h-4 w-4" />
+                      Upload PDF
+                    </button>
+                    <input accept="application/pdf" className="sr-only" data-testid="pdf-upload" multiple onChange={(event) => void handleUpload(event)} ref={fileInputRef} type="file" />
+                  </div>
+
+                  {notice ? (
+                    <div className={classNames("mt-4 rounded-2xl border px-4 py-3 text-sm", notice.tone === "error" ? "border-danger bg-danger/10 text-red-200" : "border-neon-cyan/40 bg-neon-cyan/10 text-neon-cyan")} role="status">
+                      {notice.message}
                     </div>
-                  ) : (
-                    <EmptyPanel>No data room selected.</EmptyPanel>
-                  )}
-                </Tabs.Content>
-              </Tabs.Root>
-            </aside>
-          </div>
-        </section>
+                  ) : null}
+                </section>
+
+                <section className="p-5">
+                  <DriveTable
+                    canEdit={canEdit}
+                    items={visibleItems}
+                    onDelete={(item) => setDialog({ type: "delete-item", item })}
+                    onMove={(item) => setDialog({ type: "move-item", item })}
+                    onOpen={(item) => {
+                      if (item.type === "FOLDER") {
+                        setCurrentParentId(item.id);
+                        setSelectedFileId(null);
+                        setSearchQuery("");
+                        return;
+                      }
+
+                      setSelectedFileId(item.id);
+                    }}
+                    onRename={(item) => setDialog({ type: "rename-item", item })}
+                    ownerName={selectedDataroom?.owner?.name ?? currentUser.name}
+                    selectedFileId={selectedFileId}
+                  />
+                </section>
+              </div>
+
+              <AccessFrame
+                access={accessQuery.data?.access ?? []}
+                canManageAccess={canManageAccess}
+                dataroom={selectedDataroom}
+                fileUrl={fileUrl}
+                isLoading={accessQuery.isLoading}
+                onManage={() => setAccessDialogOpen(true)}
+                onOpenViewer={() => setViewerOpen(true)}
+                selectedFile={selectedFile}
+                userName={currentUser.name}
+                userRole={selectedDataroom?.role ?? null}
+              />
+            </div>
+          </section>
+        </div>
       </div>
+
+      {contextMenu ? (
+        <DataroomContextMenu
+          canManageAccess={contextMenu.dataroom.role === "OWNER"}
+          menu={contextMenu}
+          onClose={() => setContextMenu(null)}
+          onDelete={() => {
+            setDialog({ type: "delete-dataroom", dataroom: contextMenu.dataroom });
+            setContextMenu(null);
+          }}
+          onManageAccess={() => {
+            setAccessDialogOpen(true);
+            setContextMenu(null);
+          }}
+          onRename={() => {
+            setDialog({ type: "rename-dataroom", dataroom: contextMenu.dataroom });
+            setContextMenu(null);
+          }}
+        />
+      ) : null}
+
+      <AccessDialog
+        access={accessQuery.data?.access ?? []}
+        isOpen={accessDialogOpen}
+        isPending={accessMutation.isPending}
+        onClose={() => setAccessDialogOpen(false)}
+        onRoleChange={(userId, role) => accessMutation.mutate({ userId, role })}
+        users={usersQuery.data?.users ?? []}
+      />
 
       <NameDialog
         dialog={dialog}
@@ -380,10 +475,10 @@ export function App() {
       <Dialog.Root onOpenChange={setViewerOpen} open={viewerOpen}>
         <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 z-40 bg-black/80" />
-          <Dialog.Content className="fixed inset-4 z-50 grid grid-rows-[auto_1fr] border border-neon-yellow bg-void shadow-panel">
+          <Dialog.Content className="fixed inset-4 z-50 grid grid-rows-[auto_1fr] overflow-hidden rounded-[28px] border border-neon-yellow bg-void shadow-panel">
             <div className="flex items-center justify-between border-b border-neon-yellow/30 px-4 py-3">
               <Dialog.Title className="truncate text-base font-semibold">{selectedFile?.name}</Dialog.Title>
-              <Dialog.Close className="grid h-8 w-8 place-items-center text-neon-yellow"><X className="h-5 w-5" /></Dialog.Close>
+              <Dialog.Close className="grid h-9 w-9 place-items-center rounded-full text-neon-yellow hover:bg-neon-yellow/10"><X className="h-5 w-5" /></Dialog.Close>
             </div>
             {fileUrl ? <iframe className="h-full w-full bg-black" src={fileUrl} title="Full window PDF viewer" /> : null}
           </Dialog.Content>
@@ -393,28 +488,67 @@ export function App() {
   );
 }
 
+function TopBar(props: {
+  currentUserName: string;
+  searchQuery: string;
+  setSearchQuery: (value: string) => void;
+  onLogout: () => void;
+}) {
+  return (
+    <header className="grid h-16 grid-cols-[248px_minmax(0,720px)_1fr] items-center gap-4 bg-panel/80 px-3 max-lg:grid-cols-[1fr_auto]">
+      <div className="flex items-center gap-3 px-1">
+        <div className="grid h-10 w-10 place-items-center rounded-2xl bg-neon-yellow text-black">
+          <HardDrive className="h-6 w-6" />
+        </div>
+        <div>
+          <p className="text-xl font-semibold leading-none">Drive</p>
+          <p className="mt-1 text-xs text-neon-cyan">Cyber room</p>
+        </div>
+      </div>
+
+      <label className="relative max-lg:hidden">
+        <Search className="pointer-events-none absolute left-5 top-1/2 h-5 w-5 -translate-y-1/2 text-ghost/60" />
+        <input
+          className="h-12 w-full rounded-full border border-neon-cyan/10 bg-ghost/10 pl-14 pr-12 text-sm text-ghost outline-none transition placeholder:text-ghost/55 focus:border-neon-yellow focus:bg-void"
+          onChange={(event) => props.setSearchQuery(event.target.value)}
+          placeholder="Search in data room"
+          value={props.searchQuery}
+        />
+        <Settings className="pointer-events-none absolute right-5 top-1/2 h-5 w-5 -translate-y-1/2 text-ghost/50" />
+      </label>
+
+      <div className="flex items-center justify-end gap-3">
+        <div className="hidden rounded-full bg-neon-cyan/10 px-4 py-2 text-sm text-neon-cyan sm:block">{props.currentUserName}</div>
+        <IconButton label="Sign out" onClick={props.onLogout}>
+          <LogOut className="h-4 w-4" />
+        </IconButton>
+      </div>
+    </header>
+  );
+}
+
 function LoginScreen({ notice, onLogin }: { notice: Notice; onLogin: (email: string, password: string) => void }) {
   const [email, setEmail] = useState("owner@acme.test");
   const [password, setPassword] = useState("owner123");
 
   return (
     <main className="grid min-h-screen place-items-center bg-void p-6 text-ghost">
-      <form className="w-full max-w-md border border-neon-yellow/30 bg-panel p-6 shadow-panel" onSubmit={(event) => { event.preventDefault(); onLogin(email, password); }}>
+      <form className="w-full max-w-md rounded-[32px] border border-neon-yellow/30 bg-panel p-7 shadow-panel" onSubmit={(event) => { event.preventDefault(); onLogin(email, password); }}>
         <p className="text-xs font-black uppercase tracking-[0.2em] text-neon-yellow">Cyber Data Room</p>
         <h1 className="mt-2 text-2xl font-semibold">Sign in</h1>
         <label className="mt-6 block text-sm">
           Email
-          <input className="mt-2 h-10 w-full border border-neon-cyan/30 bg-void px-3 outline-none focus:border-neon-yellow" onChange={(event) => setEmail(event.target.value)} value={email} />
+          <input className="mt-2 h-11 w-full rounded-2xl border border-neon-cyan/30 bg-void px-4 outline-none focus:border-neon-yellow" onChange={(event) => setEmail(event.target.value)} value={email} />
         </label>
         <label className="mt-4 block text-sm">
           Password
-          <input className="mt-2 h-10 w-full border border-neon-cyan/30 bg-void px-3 outline-none focus:border-neon-yellow" onChange={(event) => setPassword(event.target.value)} type="password" value={password} />
+          <input className="mt-2 h-11 w-full rounded-2xl border border-neon-cyan/30 bg-void px-4 outline-none focus:border-neon-yellow" onChange={(event) => setPassword(event.target.value)} type="password" value={password} />
         </label>
-        <button className="mt-6 w-full bg-neon-yellow px-4 py-2 font-black text-black" type="submit">Sign in</button>
+        <button className="mt-6 w-full rounded-2xl bg-neon-yellow px-4 py-3 font-black text-black" type="submit">Sign in</button>
         <div className="mt-5 text-xs leading-6 text-ghost/60">
           Demo accounts: owner@acme.test / owner123, editor@acme.test / editor123, viewer@acme.test / viewer123.
         </div>
-        {notice ? <div className="mt-4 border border-danger bg-danger/10 p-3 text-sm text-red-200">{notice.message}</div> : null}
+        {notice ? <div className="mt-4 rounded-2xl border border-danger bg-danger/10 p-3 text-sm text-red-200">{notice.message}</div> : null}
       </form>
     </main>
   );
@@ -424,6 +558,7 @@ function DriveTable(props: {
   items: DataroomItem[];
   selectedFileId: string | null;
   canEdit: boolean;
+  ownerName: string;
   onOpen: (item: DataroomItem) => void;
   onRename: (item: DataroomItem) => void;
   onMove: (item: DataroomItem) => void;
@@ -433,24 +568,33 @@ function DriveTable(props: {
     data: props.items,
     columns: [
       {
-        header: "Name",
+        id: "name",
+        header: () => (
+          <span className="inline-flex items-center gap-2">
+            Name
+            <span className="grid h-6 w-6 place-items-center rounded-full bg-neon-cyan/25 text-neon-cyan">↑</span>
+          </span>
+        ),
         accessorKey: "name",
         cell: ({ row }) => {
           const item = row.original;
           return (
-            <button className="flex min-w-0 items-center gap-3 text-left" onClick={() => props.onOpen(item)} type="button">
-              <span className="grid h-9 w-9 shrink-0 place-items-center bg-neon-cyan/10 text-neon-cyan">
+            <button className="flex min-w-0 items-center gap-4 text-left" onClick={() => props.onOpen(item)} type="button">
+              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-neon-cyan/10 text-neon-cyan">
                 {item.type === "FOLDER" ? <Folder className="h-5 w-5" /> : <FileText className="h-5 w-5" />}
               </span>
-              <span className="truncate font-semibold">{item.name}</span>
+              <span className="min-w-0 truncate font-semibold">{item.name}</span>
+              {item.type === "FILE" ? <Users className="h-4 w-4 shrink-0 text-ghost/40" /> : null}
             </button>
           );
         }
       },
-      { header: "Type", cell: ({ row }) => (row.original.type === "FOLDER" ? "Folder" : "PDF") },
-      { header: "Updated", cell: ({ row }) => formatDateTime(row.original.updatedAt) },
+      { header: "Owner", cell: () => props.ownerName },
+      { header: "Date modified", cell: ({ row }) => formatDateTime(row.original.updatedAt) },
+      { header: "File size", cell: ({ row }) => (row.original.type === "FILE" ? formatBytes(row.original.size) : "—") },
       {
-        header: "Actions",
+        id: "actions",
+        header: "",
         cell: ({ row }) => (
           <div className="flex justify-end gap-1">
             {props.canEdit ? (
@@ -470,26 +614,26 @@ function DriveTable(props: {
   });
 
   if (props.items.length === 0) {
-    return <div className="grid min-h-[360px] place-items-center border border-neon-cyan/20 bg-panel text-ghost/60">No files or folders here.</div>;
+    return <div className="grid min-h-[420px] place-items-center rounded-[28px] border border-dashed border-neon-cyan/25 bg-panel/80 text-ghost/60">No files or folders here.</div>;
   }
 
   return (
-    <div className="overflow-hidden border border-neon-cyan/20 bg-panel">
+    <div className="overflow-hidden rounded-[28px] border border-neon-cyan/15 bg-panel/85">
       <table className="w-full border-collapse text-sm">
-        <thead className="bg-void text-left text-xs uppercase tracking-[0.16em] text-neon-yellow">
+        <thead className="text-left text-ghost/65">
           {table.getHeaderGroups().map((group) => (
-            <tr key={group.id}>
+            <tr className="border-b border-neon-cyan/15" key={group.id}>
               {group.headers.map((header) => (
-                <th className="px-4 py-3 font-black" key={header.id}>{flexRender(header.column.columnDef.header, header.getContext())}</th>
+                <th className="px-5 py-4 font-semibold" key={header.id}>{flexRender(header.column.columnDef.header, header.getContext())}</th>
               ))}
             </tr>
           ))}
         </thead>
-        <tbody className="divide-y divide-neon-cyan/10">
+        <tbody>
           {table.getRowModel().rows.map((row) => (
-            <tr className={classNames("hover:bg-neon-cyan/5", props.selectedFileId === row.original.id ? "bg-neon-yellow/10" : "")} key={row.id}>
+            <tr className={classNames("border-b border-neon-cyan/10 transition last:border-0 hover:bg-neon-cyan/10", props.selectedFileId === row.original.id ? "bg-neon-yellow/10" : "")} key={row.id}>
               {row.getVisibleCells().map((cell) => (
-                <td className="px-4 py-3" key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</td>
+                <td className="px-5 py-3.5" key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</td>
               ))}
             </tr>
           ))}
@@ -499,61 +643,173 @@ function DriveTable(props: {
   );
 }
 
-function AccessPanel({ dataroomId, token }: { dataroomId: string | null; token: string }) {
-  const queryClient = useQueryClient();
-  const usersQuery = useQuery({ queryKey: ["users", token], queryFn: () => listUsers(token), enabled: Boolean(dataroomId) });
-  const accessQuery = useQuery({ queryKey: ["access", token, dataroomId], queryFn: () => listAccess(token, dataroomId ?? ""), enabled: Boolean(dataroomId) });
-  const records = accessQuery.data?.access ?? [];
-  const users = usersQuery.data?.users ?? [];
-
-  const mutation = useMutation({
-    mutationFn: ({ userId, role }: { userId: string; role: DataroomRole | null }) => updateAccess(token, dataroomId ?? "", userId, role),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["access"] })
-  });
+function AccessFrame(props: {
+  dataroom: Dataroom | null;
+  access: AccessRecord[];
+  canManageAccess: boolean;
+  fileUrl: string | null;
+  isLoading: boolean;
+  selectedFile: FileItem | null;
+  userName: string;
+  userRole: DataroomRole | null;
+  onManage: () => void;
+  onOpenViewer: () => void;
+}) {
+  const visibleAccess = props.canManageAccess
+    ? props.access
+    : props.dataroom
+      ? [{ id: "owner", dataroomId: props.dataroom.id, userId: props.dataroom.ownerId, role: "OWNER" as const, user: props.dataroom.owner ?? { id: props.dataroom.ownerId, email: "", name: "Owner" } }]
+      : [];
 
   return (
-    <Dialog.Root>
-      <Dialog.Trigger className="rounded-sm border border-neon-yellow/40 px-3 py-2 text-sm font-semibold text-neon-yellow" type="button">
-        <Shield className="mr-2 inline h-4 w-4" />
-        Access
-      </Dialog.Trigger>
+    <aside className="border-l border-neon-cyan/15 bg-panel/95 p-5 max-xl:border-l-0 max-xl:border-t">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-xs font-black uppercase tracking-[0.16em] text-neon-yellow">Access</p>
+          <h2 className="mt-1 text-lg font-semibold">{props.dataroom?.name ?? "No data room"}</h2>
+        </div>
+        {props.canManageAccess ? (
+          <button className="rounded-full border border-neon-yellow/40 px-3 py-2 text-sm font-semibold text-neon-yellow hover:bg-neon-yellow/10" onClick={props.onManage} type="button">
+            Manage
+          </button>
+        ) : null}
+      </div>
+
+      <div className="mt-5 rounded-[24px] border border-neon-cyan/15 bg-void/60 p-4">
+        <p className="text-sm font-semibold">Current access</p>
+        {props.isLoading ? <p className="mt-4 text-sm text-ghost/60">Loading access...</p> : null}
+        <div className="mt-4 space-y-3">
+          {visibleAccess.map((record) => (
+            <div className="flex items-center gap-3 rounded-2xl bg-panel/80 p-3" key={`${record.userId}-${record.role}`}>
+              <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-neon-yellow text-sm font-black text-black">
+                {record.user.name.slice(0, 1).toUpperCase()}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-semibold">{record.user.name}</p>
+                <p className="truncate text-xs text-ghost/50">{record.user.email || "Owner"}</p>
+              </div>
+              <RoleBadge role={record.role} />
+            </div>
+          ))}
+        </div>
+        {!props.canManageAccess ? (
+          <p className="mt-4 text-xs leading-5 text-ghost/55">
+            You are signed in as {props.userName}. Full access list is available to the data room owner.
+          </p>
+        ) : null}
+      </div>
+
+      <div className="mt-5 rounded-[24px] border border-neon-cyan/15 bg-void/60 p-4">
+        <p className="text-sm font-semibold">Selected item</p>
+        {props.selectedFile ? (
+          <>
+            <dl className="mt-4 space-y-4 text-sm">
+              <Detail label="Name" value={props.selectedFile.name} />
+              <Detail label="Type" value="PDF document" />
+              <Detail label="Size" value={formatBytes(props.selectedFile.size)} />
+              <Detail label="Updated" value={formatDateTime(props.selectedFile.updatedAt)} />
+            </dl>
+            <button className="mt-5 w-full rounded-full bg-neon-yellow px-4 py-2 text-sm font-black text-black disabled:opacity-50" disabled={!props.fileUrl} onClick={props.onOpenViewer} type="button">
+              <Maximize2 className="mr-2 inline h-4 w-4" />
+              Open in viewer
+            </button>
+            {props.fileUrl ? <iframe className="mt-4 h-72 w-full rounded-3xl border border-neon-cyan/20 bg-black" src={props.fileUrl} title={`PDF preview for ${props.selectedFile.name}`} /> : null}
+          </>
+        ) : (
+          <p className="mt-4 text-sm leading-6 text-ghost/55">Select a file to see its address and metadata.</p>
+        )}
+      </div>
+
+      {props.userRole ? (
+        <div className="mt-5 rounded-[24px] border border-neon-yellow/20 bg-neon-yellow/10 p-4 text-sm">
+          Your role: <span className="font-black text-neon-yellow">{props.userRole}</span>
+        </div>
+      ) : null}
+    </aside>
+  );
+}
+
+function AccessDialog(props: {
+  isOpen: boolean;
+  users: Array<{ id: string; email: string; name: string }>;
+  access: AccessRecord[];
+  isPending: boolean;
+  onClose: () => void;
+  onRoleChange: (userId: string, role: DataroomRole | null) => void;
+}) {
+  return (
+    <Dialog.Root onOpenChange={(open) => !open && props.onClose()} open={props.isOpen}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-40 bg-black/70" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[520px] max-w-[calc(100vw-32px)] -translate-x-1/2 -translate-y-1/2 border border-neon-yellow bg-panel p-5 shadow-panel">
+        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[560px] max-w-[calc(100vw-32px)] -translate-x-1/2 -translate-y-1/2 rounded-[28px] border border-neon-yellow bg-panel p-5 shadow-panel">
           <Dialog.Title className="text-lg font-semibold">Manage data room access</Dialog.Title>
           <div className="mt-5 space-y-3">
-            {users.map((user) => {
-              const record = records.find((candidate) => candidate.userId === user.id);
+            {props.users.map((user) => {
+              const record = props.access.find((candidate) => candidate.userId === user.id);
               return (
-                <div className="grid grid-cols-[1fr_160px] items-center gap-3 border border-neon-cyan/20 p-3" key={user.id}>
+                <div className="grid grid-cols-[1fr_170px] items-center gap-3 rounded-3xl border border-neon-cyan/20 p-3 max-sm:grid-cols-1" key={user.id}>
                   <div>
                     <p className="font-semibold">{user.name}</p>
                     <p className="text-xs text-ghost/60">{user.email}</p>
                   </div>
-                  <RoleSelect disabled={record?.role === "OWNER"} role={record?.role ?? null} onChange={(role) => mutation.mutate({ userId: user.id, role })} />
+                  <RoleSelect disabled={record?.role === "OWNER" || props.isPending} role={record?.role ?? null} onChange={(role) => props.onRoleChange(user.id, role)} />
                 </div>
               );
             })}
           </div>
-          <Dialog.Close className="mt-5 rounded-sm bg-neon-yellow px-4 py-2 text-sm font-black text-black">Done</Dialog.Close>
+          <Dialog.Close className="mt-5 rounded-full bg-neon-yellow px-5 py-2 text-sm font-black text-black">Done</Dialog.Close>
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
   );
 }
 
+function DataroomContextMenu(props: {
+  menu: NonNullable<ContextMenuState>;
+  canManageAccess: boolean;
+  onManageAccess: () => void;
+  onRename: () => void;
+  onDelete: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <div
+      className="fixed z-50 w-56 rounded-3xl border border-neon-cyan/25 bg-panel p-2 shadow-panel"
+      onClick={(event) => event.stopPropagation()}
+      style={{ left: props.menu.x, top: props.menu.y }}
+    >
+      <button className="flex w-full items-center gap-3 rounded-2xl px-3 py-2 text-left text-sm text-neon-yellow hover:bg-neon-yellow/10 disabled:opacity-45" disabled={!props.canManageAccess} onClick={props.onManageAccess} type="button">
+        <Shield className="h-4 w-4" />
+        Manage access
+      </button>
+      <button className="flex w-full items-center gap-3 rounded-2xl px-3 py-2 text-left text-sm hover:bg-neon-cyan/10" onClick={props.onRename} type="button">
+        <Pencil className="h-4 w-4" />
+        Rename
+      </button>
+      <button className="flex w-full items-center gap-3 rounded-2xl px-3 py-2 text-left text-sm text-red-300 hover:bg-danger/10" onClick={props.onDelete} type="button">
+        <Trash2 className="h-4 w-4" />
+        Delete
+      </button>
+      <button className="mt-1 flex w-full items-center gap-3 rounded-2xl px-3 py-2 text-left text-sm text-ghost/60 hover:bg-ghost/10" onClick={props.onClose} type="button">
+        <X className="h-4 w-4" />
+        Close
+      </button>
+    </div>
+  );
+}
+
 function RoleSelect({ disabled, role, onChange }: { disabled: boolean; role: DataroomRole | null; onChange: (role: DataroomRole | null) => void }) {
   return (
     <Select.Root disabled={disabled} onValueChange={(value) => onChange(value === "NONE" ? null : (value as DataroomRole))} value={role ?? "NONE"}>
-      <Select.Trigger className="flex h-9 items-center justify-between border border-neon-cyan/30 bg-void px-3 text-sm">
+      <Select.Trigger className="flex h-10 items-center justify-between rounded-2xl border border-neon-cyan/30 bg-void px-3 text-sm">
         <Select.Value />
         <Select.Icon><ChevronDown className="h-4 w-4" /></Select.Icon>
       </Select.Trigger>
       <Select.Portal>
-        <Select.Content className="z-50 border border-neon-cyan/40 bg-panel text-ghost shadow-panel">
+        <Select.Content className="z-50 rounded-2xl border border-neon-cyan/40 bg-panel p-1 text-ghost shadow-panel">
           <Select.Viewport>
             {["NONE", "VIEWER", "EDITOR", "OWNER"].map((value) => (
-              <Select.Item className="cursor-pointer px-3 py-2 text-sm outline-none hover:bg-neon-cyan/10 data-[disabled]:opacity-40" disabled={value === "OWNER" && role !== "OWNER"} key={value} value={value}>
+              <Select.Item className="cursor-pointer rounded-xl px-3 py-2 text-sm outline-none hover:bg-neon-cyan/10 data-[disabled]:opacity-40" disabled={value === "OWNER" && role !== "OWNER"} key={value} value={value}>
                 <Select.ItemText>{value.toLowerCase()}</Select.ItemText>
               </Select.Item>
             ))}
@@ -586,13 +842,13 @@ function NameDialog(props: {
     <Dialog.Root onOpenChange={(open) => !open && props.onCancel()} open={Boolean(props.dialog)}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-40 bg-black/70" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[440px] max-w-[calc(100vw-32px)] -translate-x-1/2 -translate-y-1/2 border border-neon-yellow bg-panel p-5 shadow-panel">
+        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[440px] max-w-[calc(100vw-32px)] -translate-x-1/2 -translate-y-1/2 rounded-[28px] border border-neon-yellow bg-panel p-5 shadow-panel">
           <Dialog.Title className="text-lg font-semibold">{dialogTitle(props.dialog)}</Dialog.Title>
           {props.dialog?.type === "move-item" ? (
             <label className="mt-5 block text-sm">
               Destination
-              <select className="mt-2 h-10 w-full border border-neon-cyan/30 bg-void px-3" onChange={(event) => setParentId(event.target.value || null)} value={parentId ?? ""}>
-                <option value="">My Drive root</option>
+              <select className="mt-2 h-11 w-full rounded-2xl border border-neon-cyan/30 bg-void px-3" onChange={(event) => setParentId(event.target.value || null)} value={parentId ?? ""}>
+                <option value="">Data room root</option>
                 {props.folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
               </select>
             </label>
@@ -600,12 +856,12 @@ function NameDialog(props: {
           {needsInput ? (
             <label className="mt-5 block text-sm">
               Name
-              <input className="mt-2 h-10 w-full border border-neon-cyan/30 bg-void px-3" onChange={(event) => setValue(event.target.value)} value={value} />
+              <input className="mt-2 h-11 w-full rounded-2xl border border-neon-cyan/30 bg-void px-4" onChange={(event) => setValue(event.target.value)} value={value} />
             </label>
           ) : null}
           <div className="mt-5 flex justify-end gap-2">
-            <Dialog.Close className="border border-neon-cyan/30 px-4 py-2 text-sm" type="button">Cancel</Dialog.Close>
-            <button className="bg-neon-yellow px-4 py-2 text-sm font-black text-black" onClick={() => props.onConfirm(value, parentId)} type="button">
+            <Dialog.Close className="rounded-full border border-neon-cyan/30 px-4 py-2 text-sm" type="button">Cancel</Dialog.Close>
+            <button className="rounded-full bg-neon-yellow px-5 py-2 text-sm font-black text-black" onClick={() => props.onConfirm(value, parentId)} type="button">
               {props.dialog?.type?.startsWith("delete") ? "Delete" : props.dialog?.type === "move-item" ? "Move" : "Save"}
             </button>
           </div>
@@ -615,8 +871,44 @@ function NameDialog(props: {
   );
 }
 
+function FilterButton({ label }: { label: string }) {
+  return (
+    <button className="rounded-full border border-neon-cyan/30 px-4 py-2 text-sm text-ghost/85 hover:bg-neon-cyan/10" type="button">
+      {label}
+      <ChevronDown className="ml-2 inline h-4 w-4" />
+    </button>
+  );
+}
+
+function SideNavItem({ active = false, icon, label }: { active?: boolean; icon: ReactNode; label: string }) {
+  return (
+    <button className={classNames("flex w-full items-center gap-3 rounded-full px-4 py-2.5 text-left", active ? "bg-neon-cyan/15 text-neon-cyan" : "text-ghost/75 hover:bg-neon-cyan/10")} type="button">
+      {icon}
+      {label}
+    </button>
+  );
+}
+
+function StorageMeter() {
+  return (
+    <div className="mt-8 px-3 text-sm text-ghost/70">
+      <div className="flex items-center gap-3">
+        <HardDrive className="h-5 w-5" />
+        Storage
+      </div>
+      <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-ghost/15">
+        <div className="h-full w-7/12 rounded-full bg-neon-yellow" />
+      </div>
+      <p className="mt-3 text-xs">8.31 GB used of 15 GB</p>
+      <button className="mt-4 w-full rounded-full border border-neon-cyan/30 px-4 py-2 text-xs font-semibold text-neon-cyan" type="button">
+        Increase storage
+      </button>
+    </div>
+  );
+}
+
 function RoleBadge({ role }: { role: DataroomRole }) {
-  return <span className="rounded-sm border border-neon-yellow/30 px-1.5 py-0.5 text-[10px] font-black uppercase text-neon-yellow">{role}</span>;
+  return <span className="rounded-full border border-neon-yellow/30 px-2 py-0.5 text-[10px] font-black uppercase text-neon-yellow">{role}</span>;
 }
 
 function Detail({ label, value }: { label: string; value: string }) {
@@ -628,16 +920,37 @@ function Detail({ label, value }: { label: string; value: string }) {
   );
 }
 
-function EmptyPanel({ children }: { children: ReactNode }) {
-  return <div className="border border-dashed border-neon-cyan/30 bg-void p-4 text-sm leading-6 text-ghost/60">{children}</div>;
-}
-
 function IconButton({ children, danger = false, label, onClick }: { children: ReactNode; danger?: boolean; label: string; onClick: () => void }) {
   return (
-    <button aria-label={label} className={classNames("grid h-8 w-8 place-items-center border transition", danger ? "border-danger/40 text-red-300 hover:bg-danger/10" : "border-neon-cyan/25 text-neon-cyan hover:bg-neon-cyan/10")} onClick={onClick} title={label} type="button">
+    <button aria-label={label} className={classNames("grid h-9 w-9 place-items-center rounded-full border transition", danger ? "border-danger/40 text-red-300 hover:bg-danger/10" : "border-neon-cyan/25 text-neon-cyan hover:bg-neon-cyan/10")} onClick={onClick} title={label} type="button">
       {children}
     </button>
   );
+}
+
+function buildAddress(
+  dataroom: Dataroom | null,
+  items: DataroomItem[],
+  parentId: string | null,
+  selectedFile: FileItem | null,
+  onDataroomClick: () => void,
+  onFolderClick: (folderId: string) => void
+) {
+  const parts: Array<{ kind: "dataroom" | "folder" | "file"; id: string | null; label: string; clickable: boolean; onClick?: () => void }> = [];
+
+  if (dataroom) {
+    parts.push({ kind: "dataroom", id: dataroom.id, label: dataroom.name, clickable: true, onClick: onDataroomClick });
+  }
+
+  for (const folder of buildBreadcrumbs(items, parentId)) {
+    parts.push({ kind: "folder", id: folder.id, label: folder.name, clickable: true, onClick: () => onFolderClick(folder.id) });
+  }
+
+  if (selectedFile) {
+    parts.push({ kind: "file", id: selectedFile.id, label: selectedFile.name, clickable: false });
+  }
+
+  return parts;
 }
 
 function buildBreadcrumbs(items: DataroomItem[], parentId: string | null) {
