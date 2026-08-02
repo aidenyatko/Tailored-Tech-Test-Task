@@ -21,12 +21,27 @@ export class DataroomsService {
       include: { dataroom: { include: { owner: true } } },
       orderBy: { dataroom: { name: "asc" } }
     });
+    const directRoomIds = access.map((record) => record.dataroomId);
+    const publicRooms = await this.prisma.dataroom.findMany({
+      where: {
+        publicRole: { not: null },
+        id: directRoomIds.length > 0 ? { notIn: directRoomIds } : undefined
+      },
+      include: { owner: true }
+    });
 
-    return access.map((record) => ({
-      ...record.dataroom,
-      owner: publicUser(record.dataroom.owner),
-      role: record.role
-    }));
+    return [
+      ...access.map((record) => ({
+        ...record.dataroom,
+        owner: publicUser(record.dataroom.owner),
+        role: record.role
+      })),
+      ...publicRooms.map((dataroom) => ({
+        ...dataroom,
+        owner: publicUser(dataroom.owner),
+        role: dataroom.publicRole ?? DataroomRole.VIEWER
+      }))
+    ].sort((left, right) => left.name.localeCompare(right.name));
   }
 
   async createDataroom(userId: string, name: string) {
@@ -245,17 +260,41 @@ export class DataroomsService {
     return this.listAccess(userId, dataroomId);
   }
 
+  async updatePublicAccess(userId: string, dataroomId: string, role: DataroomRole | null) {
+    await this.requireRole(userId, dataroomId, [DataroomRole.OWNER]);
+
+    if (role === DataroomRole.OWNER) {
+      throw new BadRequestException("Public access can be viewer or editor only.");
+    }
+
+    return this.prisma.dataroom.update({
+      where: { id: dataroomId },
+      data: { publicRole: role },
+      include: { owner: true }
+    });
+  }
+
   private async requireRole(userId: string, dataroomId: string, roles: DataroomRole[]) {
     const access = await this.prisma.dataroomAccess.findUnique({
       where: { dataroomId_userId: { dataroomId, userId } },
       include: { dataroom: true }
     });
 
-    if (!access || !roles.includes(access.role)) {
+    if (access) {
+      if (roles.includes(access.role)) {
+        return access.dataroom;
+      }
+
       throw new ForbiddenException("You do not have access to this data room.");
     }
 
-    return access.dataroom;
+    const dataroom = await this.prisma.dataroom.findUnique({ where: { id: dataroomId } });
+
+    if (!dataroom?.publicRole || !roles.includes(dataroom.publicRole)) {
+      throw new ForbiddenException("You do not have access to this data room.");
+    }
+
+    return dataroom;
   }
 
   private async requireItem(itemId: string) {

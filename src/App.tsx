@@ -10,11 +10,7 @@ import {
   Eye,
   FileText,
   Folder,
-  Grid3X3,
   HardDrive,
-  Home,
-  Info,
-  List,
   LogOut,
   Maximize2,
   MoveRight,
@@ -23,7 +19,6 @@ import {
   Search,
   Settings,
   Shield,
-  Sparkles,
   Trash2,
   Upload,
   Users,
@@ -46,8 +41,10 @@ import {
   moveItem,
   renameDataroom,
   renameItem,
+  register,
   storeToken,
   updateAccess,
+  updatePublicAccess,
   uploadFiles
 } from "./api/client";
 import type { AccessRecord, Dataroom, DataroomItem, DataroomRole, FileItem } from "./api/types";
@@ -65,6 +62,10 @@ type DialogState =
 
 type Notice = { tone: "success" | "error"; message: string } | null;
 type ContextMenuState = { x: number; y: number; dataroom: Dataroom } | null;
+type ItemTypeFilter = "ALL" | "FOLDER" | "FILE";
+type ModifiedFilter = "ALL" | "TODAY" | "WEEK" | "MONTH";
+type SortField = "name" | "owner" | "updatedAt" | "size";
+type SortState = { field: SortField; direction: "asc" | "desc" };
 
 export function App() {
   const queryClient = useQueryClient();
@@ -79,6 +80,9 @@ export function App() {
   const [viewerOpen, setViewerOpen] = useState(false);
   const [accessDialogOpen, setAccessDialogOpen] = useState(false);
   const [contextMenu, setContextMenu] = useState<ContextMenuState>(null);
+  const [typeFilter, setTypeFilter] = useState<ItemTypeFilter>("ALL");
+  const [modifiedFilter, setModifiedFilter] = useState<ModifiedFilter>("ALL");
+  const [sort, setSort] = useState<SortState>({ field: "name", direction: "asc" });
 
   useEffect(() => {
     if (!contextMenu) {
@@ -137,11 +141,19 @@ export function App() {
     enabled: Boolean(token && accessDialogOpen && canManageAccess)
   });
 
+  const currentUser = meQuery.data?.user ?? null;
   const allItems = useMemo(() => allItemsQuery.data?.items ?? [], [allItemsQuery.data?.items]);
   const serverVisibleItems = useMemo(() => visibleItemsQuery.data?.items ?? [], [visibleItemsQuery.data?.items]);
-  const visibleItems = searchQuery.trim()
-    ? serverVisibleItems
-    : serverVisibleItems.filter((item) => item.parentId === currentParentId);
+  const baseVisibleItems = useMemo(
+    () => searchQuery.trim()
+      ? serverVisibleItems
+      : serverVisibleItems.filter((item) => item.parentId === currentParentId),
+    [currentParentId, searchQuery, serverVisibleItems]
+  );
+  const visibleItems = useMemo(
+    () => sortItems(filterItems(baseVisibleItems, typeFilter, modifiedFilter), sort, selectedDataroom?.owner?.name ?? currentUser?.name ?? ""),
+    [baseVisibleItems, currentUser?.name, modifiedFilter, selectedDataroom?.owner?.name, sort, typeFilter]
+  );
   const selectedFile = allItems.find((item): item is FileItem => item.id === selectedFileId && item.type === "FILE") ?? null;
   const currentFolder = currentParentId ? allItems.find((item) => item.id === currentParentId) ?? null : null;
   const selectedAddress = useMemo(
@@ -161,7 +173,6 @@ export function App() {
     ),
     [allItems, currentParentId, selectedDataroom, selectedFile]
   );
-  const currentUser = meQuery.data?.user ?? null;
   const fileUrl = selectedFile && token ? fileContentUrl(selectedFile.id, token) : null;
 
   const refreshWorkspace = async () => {
@@ -186,6 +197,17 @@ export function App() {
       storeToken(payload.token);
       setToken(payload.token);
       setNotice({ tone: "success", message: `Signed in as ${payload.user.name}.` });
+      await queryClient.invalidateQueries();
+    },
+    onError: (error: Error) => setNotice({ tone: "error", message: error.message })
+  });
+
+  const registerMutation = useMutation({
+    mutationFn: (payload: { email: string; name: string; password: string }) => register(payload.email, payload.name, payload.password),
+    onSuccess: async (payload) => {
+      storeToken(payload.token);
+      setToken(payload.token);
+      setNotice({ tone: "success", message: `Created user ${payload.user.name}.` });
       await queryClient.invalidateQueries();
     },
     onError: (error: Error) => setNotice({ tone: "error", message: error.message })
@@ -216,6 +238,15 @@ export function App() {
     mutationFn: ({ userId, role }: { userId: string; role: DataroomRole | null }) => updateAccess(token ?? "", activeDataroomId ?? "", userId, role),
     onSuccess: async () => {
       setNotice({ tone: "success", message: "Access updated." });
+      await queryClient.invalidateQueries({ queryKey: ["access"] });
+    },
+    onError: (error: Error) => setNotice({ tone: "error", message: error.message })
+  });
+  const publicAccessMutation = useMutation({
+    mutationFn: (role: DataroomRole | null) => updatePublicAccess(token ?? "", activeDataroomId ?? "", role),
+    onSuccess: async () => {
+      setNotice({ tone: "success", message: "Public access updated." });
+      await queryClient.invalidateQueries({ queryKey: ["datarooms"] });
       await queryClient.invalidateQueries({ queryKey: ["access"] });
     },
     onError: (error: Error) => setNotice({ tone: "error", message: error.message })
@@ -254,6 +285,13 @@ export function App() {
     setSearchQuery("");
   }
 
+  function changeSort(field: SortField) {
+    setSort((current) => ({
+      field,
+      direction: current.field === field && current.direction === "asc" ? "desc" : "asc"
+    }));
+  }
+
   function openDataroomContextMenu(event: MouseEvent, room: Dataroom) {
     event.preventDefault();
     selectDataroom(room);
@@ -261,7 +299,13 @@ export function App() {
   }
 
   if (!token || !currentUser) {
-    return <LoginScreen notice={notice} onLogin={(email, password) => loginMutation.mutate({ email, password })} />;
+    return (
+      <LoginScreen
+        notice={notice}
+        onLogin={(email, password) => loginMutation.mutate({ email, password })}
+        onRegister={(email, name, password) => registerMutation.mutate({ email, name, password })}
+      />
+    );
   }
 
   return (
@@ -276,14 +320,7 @@ export function App() {
               Create
             </button>
 
-            <nav className="space-y-1 text-sm">
-              <SideNavItem active icon={<Users className="h-5 w-5" />} label="Available to me" />
-              <SideNavItem icon={<Home className="h-5 w-5" />} label="My drive" />
-              <SideNavItem icon={<HardDrive className="h-5 w-5" />} label="Computers" />
-              <SideNavItem icon={<Sparkles className="h-5 w-5" />} label="Starred" />
-            </nav>
-
-            <div className="mt-6 border-t border-neon-cyan/15 pt-4">
+            <div className="mt-6">
               <p className="px-3 text-xs font-black uppercase tracking-[0.16em] text-neon-yellow">Data rooms</p>
               <div className="mt-3 space-y-1">
                 {datarooms.map((room) => (
@@ -306,8 +343,6 @@ export function App() {
                 ))}
               </div>
             </div>
-
-            <StorageMeter />
           </aside>
 
           <section className="min-w-0 p-4 pl-0 max-lg:p-3">
@@ -338,17 +373,7 @@ export function App() {
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2">
-                      <button className="grid h-10 w-10 place-items-center rounded-full bg-neon-cyan/15 text-neon-cyan" title="List view" type="button">
-                        <List className="h-5 w-5" />
-                      </button>
-                      <button className="grid h-10 w-10 place-items-center rounded-full border border-neon-cyan/20 text-ghost/70" title="Grid view" type="button">
-                        <Grid3X3 className="h-5 w-5" />
-                      </button>
-                      <button className="grid h-10 w-10 place-items-center rounded-full border border-neon-cyan/20 text-ghost/70" title="Details" type="button">
-                        <Info className="h-5 w-5" />
-                      </button>
-                    </div>
+                    <div className="text-sm text-ghost/55">{visibleItems.length} item{visibleItems.length === 1 ? "" : "s"}</div>
                   </div>
 
                   <div className="mt-5 flex flex-wrap items-center gap-2">
@@ -361,10 +386,27 @@ export function App() {
                         Back
                       </button>
                     ) : null}
-                    <FilterButton label="Type" />
-                    <FilterButton label="People" />
-                    <FilterButton label="Modified" />
-                    <FilterButton label="Source" />
+                    <FilterSelect
+                      label="Type"
+                      onChange={(value) => setTypeFilter(value as ItemTypeFilter)}
+                      options={[
+                        { label: "All types", value: "ALL" },
+                        { label: "Folders", value: "FOLDER" },
+                        { label: "PDF files", value: "FILE" }
+                      ]}
+                      value={typeFilter}
+                    />
+                    <FilterSelect
+                      label="Modified"
+                      onChange={(value) => setModifiedFilter(value as ModifiedFilter)}
+                      options={[
+                        { label: "Any time", value: "ALL" },
+                        { label: "Today", value: "TODAY" },
+                        { label: "Last 7 days", value: "WEEK" },
+                        { label: "Last 30 days", value: "MONTH" }
+                      ]}
+                      value={modifiedFilter}
+                    />
                     <button className="ml-auto rounded-full border border-neon-cyan/30 px-4 py-2 text-sm font-semibold text-neon-cyan disabled:opacity-40 max-md:ml-0" disabled={!canEdit} onClick={() => setDialog({ type: "create-folder" })} type="button">
                       <Folder className="mr-2 inline h-4 w-4" />
                       New folder
@@ -402,6 +444,8 @@ export function App() {
                     onRename={(item) => setDialog({ type: "rename-item", item })}
                     ownerName={selectedDataroom?.owner?.name ?? currentUser.name}
                     selectedFileId={selectedFileId}
+                    sort={sort}
+                    onSort={changeSort}
                   />
                 </section>
               </div>
@@ -446,9 +490,11 @@ export function App() {
       <AccessDialog
         access={accessQuery.data?.access ?? []}
         isOpen={accessDialogOpen}
-        isPending={accessMutation.isPending}
+        isPending={accessMutation.isPending || publicAccessMutation.isPending}
         onClose={() => setAccessDialogOpen(false)}
+        onPublicRoleChange={(role) => publicAccessMutation.mutate(role)}
         onRoleChange={(userId, role) => accessMutation.mutate({ userId, role })}
+        publicRole={selectedDataroom?.publicRole ?? null}
         users={usersQuery.data?.users ?? []}
       />
 
@@ -527,15 +573,48 @@ function TopBar(props: {
   );
 }
 
-function LoginScreen({ notice, onLogin }: { notice: Notice; onLogin: (email: string, password: string) => void }) {
+function LoginScreen({ notice, onLogin, onRegister }: {
+  notice: Notice;
+  onLogin: (email: string, password: string) => void;
+  onRegister: (email: string, name: string, password: string) => void;
+}) {
+  const [mode, setMode] = useState<"login" | "register">("login");
+  const [name, setName] = useState("New User");
   const [email, setEmail] = useState("owner@acme.test");
   const [password, setPassword] = useState("owner123");
+  const isRegister = mode === "register";
+
+  function switchMode(nextMode: "login" | "register") {
+    setMode(nextMode);
+
+    if (nextMode === "login") {
+      setEmail("owner@acme.test");
+      setPassword("owner123");
+      return;
+    }
+
+    setEmail("");
+    setPassword("");
+  }
 
   return (
     <main className="grid min-h-screen place-items-center bg-void p-6 text-ghost">
-      <form className="w-full max-w-md rounded-[32px] border border-neon-yellow/30 bg-panel p-7 shadow-panel" onSubmit={(event) => { event.preventDefault(); onLogin(email, password); }}>
+      <form className="w-full max-w-md rounded-[32px] border border-neon-yellow/30 bg-panel p-7 shadow-panel" onSubmit={(event) => {
+        event.preventDefault();
+        if (isRegister) {
+          onRegister(email, name, password);
+          return;
+        }
+        onLogin(email, password);
+      }}>
         <p className="text-xs font-black uppercase tracking-[0.2em] text-neon-yellow">Cyber Data Room</p>
-        <h1 className="mt-2 text-2xl font-semibold">Sign in</h1>
+        <h1 className="mt-2 text-2xl font-semibold">{isRegister ? "Create user" : "Sign in"}</h1>
+        {isRegister ? (
+          <label className="mt-6 block text-sm">
+            Name
+            <input className="mt-2 h-11 w-full rounded-2xl border border-neon-cyan/30 bg-void px-4 outline-none focus:border-neon-yellow" onChange={(event) => setName(event.target.value)} value={name} />
+          </label>
+        ) : null}
         <label className="mt-6 block text-sm">
           Email
           <input className="mt-2 h-11 w-full rounded-2xl border border-neon-cyan/30 bg-void px-4 outline-none focus:border-neon-yellow" onChange={(event) => setEmail(event.target.value)} value={email} />
@@ -544,11 +623,16 @@ function LoginScreen({ notice, onLogin }: { notice: Notice; onLogin: (email: str
           Password
           <input className="mt-2 h-11 w-full rounded-2xl border border-neon-cyan/30 bg-void px-4 outline-none focus:border-neon-yellow" onChange={(event) => setPassword(event.target.value)} type="password" value={password} />
         </label>
-        <button className="mt-6 w-full rounded-2xl bg-neon-yellow px-4 py-3 font-black text-black" type="submit">Sign in</button>
-        <div className="mt-5 text-xs leading-6 text-ghost/60">
+        <button className="mt-6 w-full rounded-2xl bg-neon-yellow px-4 py-3 font-black text-black" type="submit">{isRegister ? "Create user" : "Sign in"}</button>
+        <button className="mt-3 w-full rounded-2xl border border-neon-cyan/30 px-4 py-3 text-sm font-semibold text-neon-cyan hover:bg-neon-cyan/10" onClick={() => switchMode(isRegister ? "login" : "register")} type="button">
+          {isRegister ? "Back to sign in" : "Create a new user"}
+        </button>
+        {!isRegister ? (
+          <div className="mt-5 text-xs leading-6 text-ghost/60">
           Demo accounts: owner@acme.test / owner123, editor@acme.test / editor123, viewer@acme.test / viewer123.
-        </div>
-        {notice ? <div className="mt-4 rounded-2xl border border-danger bg-danger/10 p-3 text-sm text-red-200">{notice.message}</div> : null}
+          </div>
+        ) : null}
+        {notice ? <div className={classNames("mt-4 rounded-2xl border p-3 text-sm", notice.tone === "error" ? "border-danger bg-danger/10 text-red-200" : "border-neon-cyan/40 bg-neon-cyan/10 text-neon-cyan")}>{notice.message}</div> : null}
       </form>
     </main>
   );
@@ -559,22 +643,19 @@ function DriveTable(props: {
   selectedFileId: string | null;
   canEdit: boolean;
   ownerName: string;
+  sort: SortState;
   onOpen: (item: DataroomItem) => void;
   onRename: (item: DataroomItem) => void;
   onMove: (item: DataroomItem) => void;
   onDelete: (item: DataroomItem) => void;
+  onSort: (field: SortField) => void;
 }) {
   const table = useReactTable({
     data: props.items,
     columns: [
       {
         id: "name",
-        header: () => (
-          <span className="inline-flex items-center gap-2">
-            Name
-            <span className="grid h-6 w-6 place-items-center rounded-full bg-neon-cyan/25 text-neon-cyan">↑</span>
-          </span>
-        ),
+        header: () => <SortHeader field="name" label="Name" onSort={props.onSort} sort={props.sort} />,
         accessorKey: "name",
         cell: ({ row }) => {
           const item = row.original;
@@ -589,9 +670,9 @@ function DriveTable(props: {
           );
         }
       },
-      { header: "Owner", cell: () => props.ownerName },
-      { header: "Date modified", cell: ({ row }) => formatDateTime(row.original.updatedAt) },
-      { header: "File size", cell: ({ row }) => (row.original.type === "FILE" ? formatBytes(row.original.size) : "—") },
+      { id: "owner", header: () => <SortHeader field="owner" label="Owner" onSort={props.onSort} sort={props.sort} />, cell: () => props.ownerName },
+      { id: "updatedAt", header: () => <SortHeader field="updatedAt" label="Date modified" onSort={props.onSort} sort={props.sort} />, cell: ({ row }) => formatDateTime(row.original.updatedAt) },
+      { id: "size", header: () => <SortHeader field="size" label="File size" onSort={props.onSort} sort={props.sort} />, cell: ({ row }) => (row.original.type === "FILE" ? formatBytes(row.original.size) : "-") },
       {
         id: "actions",
         header: "",
@@ -643,6 +724,19 @@ function DriveTable(props: {
   );
 }
 
+function SortHeader(props: { field: SortField; label: string; sort: SortState; onSort: (field: SortField) => void }) {
+  const active = props.sort.field === props.field;
+
+  return (
+    <button className="inline-flex items-center gap-2 rounded-full px-2 py-1 text-left hover:bg-neon-cyan/10" onClick={() => props.onSort(props.field)} type="button">
+      {props.label}
+      <span className={classNames("grid h-6 w-6 place-items-center rounded-full", active ? "bg-neon-cyan/25 text-neon-cyan" : "bg-ghost/10 text-ghost/45")}>
+        <ChevronDown className={classNames("h-4 w-4 transition", active && props.sort.direction === "asc" ? "rotate-180" : "")} />
+      </span>
+    </button>
+  );
+}
+
 function AccessFrame(props: {
   dataroom: Dataroom | null;
   access: AccessRecord[];
@@ -660,6 +754,7 @@ function AccessFrame(props: {
     : props.dataroom
       ? [{ id: "owner", dataroomId: props.dataroom.id, userId: props.dataroom.ownerId, role: "OWNER" as const, user: props.dataroom.owner ?? { id: props.dataroom.ownerId, email: "", name: "Owner" } }]
       : [];
+  const publicRole = props.dataroom?.publicRole ?? null;
 
   return (
     <aside className="border-l border-neon-cyan/15 bg-panel/95 p-5 max-xl:border-l-0 max-xl:border-t">
@@ -675,10 +770,28 @@ function AccessFrame(props: {
         ) : null}
       </div>
 
+      {props.userRole ? (
+        <div className="mt-5 rounded-[24px] border border-neon-yellow/20 bg-neon-yellow/10 p-4 text-sm">
+          Your role: <span className="font-black text-neon-yellow">{props.userRole}</span>
+        </div>
+      ) : null}
+
       <div className="mt-5 rounded-[24px] border border-neon-cyan/15 bg-void/60 p-4">
         <p className="text-sm font-semibold">Current access</p>
         {props.isLoading ? <p className="mt-4 text-sm text-ghost/60">Loading access...</p> : null}
         <div className="mt-4 space-y-3">
+          {publicRole ? (
+            <div className="flex items-center gap-3 rounded-2xl bg-neon-cyan/10 p-3">
+              <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-neon-cyan text-sm font-black text-black">
+                <Users className="h-4 w-4" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-semibold">Everyone</p>
+                <p className="truncate text-xs text-ghost/50">All users</p>
+              </div>
+              <RoleBadge role={publicRole} />
+            </div>
+          ) : null}
           {visibleAccess.map((record) => (
             <div className="flex items-center gap-3 rounded-2xl bg-panel/80 p-3" key={`${record.userId}-${record.role}`}>
               <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-neon-yellow text-sm font-black text-black">
@@ -720,11 +833,6 @@ function AccessFrame(props: {
         )}
       </div>
 
-      {props.userRole ? (
-        <div className="mt-5 rounded-[24px] border border-neon-yellow/20 bg-neon-yellow/10 p-4 text-sm">
-          Your role: <span className="font-black text-neon-yellow">{props.userRole}</span>
-        </div>
-      ) : null}
     </aside>
   );
 }
@@ -733,18 +841,48 @@ function AccessDialog(props: {
   isOpen: boolean;
   users: Array<{ id: string; email: string; name: string }>;
   access: AccessRecord[];
+  publicRole: DataroomRole | null;
   isPending: boolean;
   onClose: () => void;
+  onPublicRoleChange: (role: DataroomRole | null) => void;
   onRoleChange: (userId: string, role: DataroomRole | null) => void;
 }) {
+  const [query, setQuery] = useState("");
+  const normalizedQuery = query.trim().toLowerCase();
+  const filteredUsers = normalizedQuery
+    ? props.users.filter((user) => `${user.name} ${user.email}`.toLowerCase().includes(normalizedQuery))
+    : props.users;
+
+  useEffect(() => {
+    if (!props.isOpen) {
+      setQuery("");
+    }
+  }, [props.isOpen]);
+
   return (
     <Dialog.Root onOpenChange={(open) => !open && props.onClose()} open={props.isOpen}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-40 bg-black/70" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[560px] max-w-[calc(100vw-32px)] -translate-x-1/2 -translate-y-1/2 rounded-[28px] border border-neon-yellow bg-panel p-5 shadow-panel">
+        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[calc(100vh-32px)] w-[620px] max-w-[calc(100vw-32px)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-[32px] border border-neon-yellow bg-panel p-5 shadow-panel">
           <Dialog.Title className="text-lg font-semibold">Manage data room access</Dialog.Title>
+          <div className="mt-5 grid grid-cols-[1fr_170px] items-center gap-3 rounded-[28px] border border-neon-yellow/35 bg-neon-yellow/10 p-3 max-sm:grid-cols-1">
+            <div>
+              <p className="font-semibold">Available to everyone</p>
+              <p className="text-xs text-ghost/60">All current and future users</p>
+            </div>
+            <RoleSelect disabled={props.isPending} role={props.publicRole} onChange={props.onPublicRoleChange} />
+          </div>
+          <label className="relative mt-4 block">
+            <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-ghost/50" />
+            <input
+              className="h-11 w-full rounded-full border border-neon-cyan/25 bg-void pl-11 pr-4 text-sm outline-none focus:border-neon-yellow"
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search users"
+              value={query}
+            />
+          </label>
           <div className="mt-5 space-y-3">
-            {props.users.map((user) => {
+            {filteredUsers.map((user) => {
               const record = props.access.find((candidate) => candidate.userId === user.id);
               return (
                 <div className="grid grid-cols-[1fr_170px] items-center gap-3 rounded-3xl border border-neon-cyan/20 p-3 max-sm:grid-cols-1" key={user.id}>
@@ -756,6 +894,9 @@ function AccessDialog(props: {
                 </div>
               );
             })}
+            {filteredUsers.length === 0 ? (
+              <div className="rounded-3xl border border-dashed border-neon-cyan/25 p-5 text-sm text-ghost/60">No users found.</div>
+            ) : null}
           </div>
           <Dialog.Close className="mt-5 rounded-full bg-neon-yellow px-5 py-2 text-sm font-black text-black">Done</Dialog.Close>
         </Dialog.Content>
@@ -871,39 +1012,21 @@ function NameDialog(props: {
   );
 }
 
-function FilterButton({ label }: { label: string }) {
+function FilterSelect(props: {
+  label: string;
+  value: string;
+  options: Array<{ label: string; value: string }>;
+  onChange: (value: string) => void;
+}) {
   return (
-    <button className="rounded-full border border-neon-cyan/30 px-4 py-2 text-sm text-ghost/85 hover:bg-neon-cyan/10" type="button">
-      {label}
-      <ChevronDown className="ml-2 inline h-4 w-4" />
-    </button>
-  );
-}
-
-function SideNavItem({ active = false, icon, label }: { active?: boolean; icon: ReactNode; label: string }) {
-  return (
-    <button className={classNames("flex w-full items-center gap-3 rounded-full px-4 py-2.5 text-left", active ? "bg-neon-cyan/15 text-neon-cyan" : "text-ghost/75 hover:bg-neon-cyan/10")} type="button">
-      {icon}
-      {label}
-    </button>
-  );
-}
-
-function StorageMeter() {
-  return (
-    <div className="mt-8 px-3 text-sm text-ghost/70">
-      <div className="flex items-center gap-3">
-        <HardDrive className="h-5 w-5" />
-        Storage
-      </div>
-      <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-ghost/15">
-        <div className="h-full w-7/12 rounded-full bg-neon-yellow" />
-      </div>
-      <p className="mt-3 text-xs">8.31 GB used of 15 GB</p>
-      <button className="mt-4 w-full rounded-full border border-neon-cyan/30 px-4 py-2 text-xs font-semibold text-neon-cyan" type="button">
-        Increase storage
-      </button>
-    </div>
+    <label className="flex items-center gap-2 rounded-full border border-neon-cyan/30 px-4 py-2 text-sm text-ghost/85">
+      <span className="text-ghost/55">{props.label}</span>
+      <select className="bg-transparent font-semibold text-ghost outline-none" onChange={(event) => props.onChange(event.target.value)} value={props.value}>
+        {props.options.map((option) => (
+          <option className="bg-panel text-ghost" key={option.value} value={option.value}>{option.label}</option>
+        ))}
+      </select>
+    </label>
   );
 }
 
@@ -926,6 +1049,68 @@ function IconButton({ children, danger = false, label, onClick }: { children: Re
       {children}
     </button>
   );
+}
+
+function filterItems(items: DataroomItem[], typeFilter: ItemTypeFilter, modifiedFilter: ModifiedFilter) {
+  const now = Date.now();
+  const day = 24 * 60 * 60 * 1000;
+
+  return items.filter((item) => {
+    if (typeFilter !== "ALL" && item.type !== typeFilter) {
+      return false;
+    }
+
+    if (modifiedFilter === "ALL") {
+      return true;
+    }
+
+    const updatedAt = new Date(item.updatedAt).getTime();
+
+    if (Number.isNaN(updatedAt)) {
+      return false;
+    }
+
+    if (modifiedFilter === "TODAY") {
+      return new Date(item.updatedAt).toDateString() === new Date(now).toDateString();
+    }
+
+    if (modifiedFilter === "WEEK") {
+      return now - updatedAt <= 7 * day;
+    }
+
+    return now - updatedAt <= 30 * day;
+  });
+}
+
+function sortItems(items: DataroomItem[], sort: SortState, ownerName: string) {
+  const direction = sort.direction === "asc" ? 1 : -1;
+
+  return [...items].sort((left, right) => {
+    const leftValue = sortValue(left, sort.field, ownerName);
+    const rightValue = sortValue(right, sort.field, ownerName);
+
+    if (typeof leftValue === "number" && typeof rightValue === "number") {
+      return (leftValue - rightValue) * direction;
+    }
+
+    return String(leftValue).localeCompare(String(rightValue)) * direction;
+  });
+}
+
+function sortValue(item: DataroomItem, field: SortField, ownerName: string) {
+  if (field === "owner") {
+    return ownerName;
+  }
+
+  if (field === "updatedAt") {
+    return new Date(item.updatedAt).getTime();
+  }
+
+  if (field === "size") {
+    return item.type === "FILE" ? item.size : 0;
+  }
+
+  return item.name.toLowerCase();
 }
 
 function buildAddress(
@@ -981,3 +1166,4 @@ function dialogTitle(dialog: DialogState) {
 function classNames(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
 }
+
