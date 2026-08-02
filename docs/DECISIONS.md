@@ -1,66 +1,455 @@
 # Architecture Decisions
 
+This document explains the main product and engineering decisions made during the data room implementation. It is written as a developer diary: what was chosen, why it was chosen, how it was implemented, and what trade-offs remain.
+
+## Product Shape
+
+The task was implemented as a Google Drive-like data room for PDF due-diligence workflows.
+
+The product goal is not just local file storage. The useful workflow is:
+
+- a user signs in;
+- the user sees only data rooms available to them;
+- an owner can manage access;
+- editors can work with folders and PDF files;
+- viewers can browse, search, and preview;
+- PDF content is indexed for search;
+- the app runs with one Docker Compose command.
+
+This shaped the architecture. A browser-only IndexedDB app would be simpler, but it cannot safely model shared access, ownership, public access, server-side search, or persistent blob metadata between users.
+
 ## Stack Alignment
 
-The backend was moved to NestJS, Prisma, and PostgreSQL to align with the Tailored Tech stack from the job post. The frontend keeps React 18, TypeScript, Tailwind, and now uses TanStack Query/Table with Radix/shadcn-style primitives.
+The backend was moved to NestJS, Prisma, and PostgreSQL to align with the Tailored Tech stack from the referenced job post. The frontend keeps React 18, TypeScript, Tailwind, TanStack Query, TanStack Table, and Radix-style primitives.
+
+Why:
+
+- NestJS gives a structured backend with controllers, services, guards, dependency injection, and testable modules.
+- Prisma gives typed database access and explicit migrations.
+- PostgreSQL is a good default for relational access rules, folder/file metadata, sessions, and indexed text.
+- React with TanStack Query keeps server state explicit and avoids hand-written fetch/cache logic across the UI.
+- TanStack Table makes table rendering easier to extend with real sorting and later pagination.
+- Radix primitives provide accessible dialogs and select controls without building low-level behavior by hand.
+
+How:
+
+- Auth logic lives in `server/src/auth`.
+- Data room, item, access, upload, move, and file streaming logic lives in `server/src/datarooms`.
+- Prisma schema and migrations live in `prisma`.
+- Frontend API calls live in `src/api`.
+- The main UI surface lives in `src/App.tsx`.
+
+Trade-off:
+
+The app is still intentionally MVP-sized. It uses the selected stack, but does not split every area into many modules or add enterprise-level abstractions before they are needed.
 
 ## PostgreSQL as Source of Truth
 
-IndexedDB was useful for the first MVP, but access control and shared data rooms need server-side state. PostgreSQL now stores:
+PostgreSQL stores the application state:
 
 - users;
 - sessions;
 - data rooms;
 - access records;
-- folder/file metadata;
+- public data-room access role;
+- folder and file metadata;
+- PDF blob keys;
 - indexed PDF text.
+
+Why:
+
+Access control is relational. A user can have many data rooms, a data room can have many users, each user can have one role per data room, and the owner must be protected from accidental removal. PostgreSQL handles these relationships directly.
+
+How:
+
+- `users` stores login identity and password hash.
+- `sessions` stores bearer tokens for the demo auth flow.
+- `datarooms` stores ownership and optional `public_role`.
+- `dataroom_access` stores direct user-to-room roles.
+- `items` stores folders and files in a self-referencing tree.
+
+Trade-off:
+
+Search is stored in PostgreSQL text fields instead of a separate search engine. This is enough for the test task and keeps the system deployable with one database, but production-scale search could later move to OpenSearch, Meilisearch, or PostgreSQL full-text search with language dictionaries.
 
 ## Prisma Migrations
 
-The Docker startup runs `prisma migrate deploy` before starting NestJS. The first migration creates tables, relations, and trigram GIN indexes for search-friendly fields.
+Database schema changes are managed through Prisma migrations.
+
+Why:
+
+The app must start consistently in Docker and CI. A migration history makes the database reproducible and reviewable.
+
+How:
+
+- The initial migration creates users, sessions, data rooms, access records, item metadata, and indexes.
+- The public access migration adds `datarooms.public_role`.
+- Docker backend startup runs `prisma migrate deploy` before starting NestJS.
+
+Trade-off:
+
+The migration process is simple and production-like, but there is no separate migration job container. For this test task, running migrations before backend start is acceptable because there is one backend container.
 
 ## Split Docker Services
 
-Docker Compose runs three services:
+Docker Compose runs separate services:
 
 - `frontend`: nginx serves the Vite build on host port `8080`;
 - `backend`: NestJS runs inside the Docker network on port `8080`;
-- `postgres`: PostgreSQL stores application state on host port `5438`.
+- `postgres`: PostgreSQL stores application data on host port `5438`.
 
-The frontend service proxies `/api/*` to `backend:8080`, so the browser still uses one origin while the frontend and backend remain separately deployable containers.
+Why:
 
-## Blob Storage
+Frontend and backend should be independently deployable. A single all-in-one container would be quicker at first, but it would hide deployment boundaries and make the architecture less realistic.
 
-PDF bytes are stored on the filesystem in a Docker volume. PostgreSQL stores the `blobKey`, metadata, and extracted text. This keeps the database lean and makes future S3-compatible storage migration straightforward.
+How:
 
-## Search and Indexing
+- `Dockerfile.frontend` builds Vite and serves static files through nginx.
+- `Dockerfile.backend` builds the NestJS backend and runs migrations before app start.
+- `nginx.conf` proxies `/api/*` from the frontend service to `backend:8080`.
 
-On upload, the backend extracts readable PDF text and stores normalized text in `items.searchText`. PostgreSQL trigram indexes are added for file names and indexed text. This gives name search and basic content search without adding a separate search engine.
+Trade-off:
 
-Limit: scanned/image PDFs need OCR for complete content search.
+The browser still talks to one origin, `http://localhost:8080`, because nginx proxies API requests. This avoids CORS complexity while keeping Docker services split internally.
+
+## Authentication
+
+Authentication is email/password with server-side sessions.
+
+Why:
+
+The task needs understandable access control and a way to create users from the login screen. A full OAuth or enterprise SSO setup would be too heavy for the scope.
+
+How:
+
+- Demo users are seeded when the database is empty.
+- Passwords are hashed before storage.
+- Login returns a bearer token.
+- `/api/auth/me` returns the current user.
+- `/api/auth/register` creates a new user and returns a session.
+
+Trade-off:
+
+This is demo-grade authentication. A production system should add password reset, stronger password policy, rate limiting, refresh tokens or signed cookies, audit logs, and possibly SSO.
 
 ## Authorization Model
 
-Each data room has access records:
+Authorization is role-based per data room.
 
-- `OWNER`: full control, including access management;
-- `EDITOR`: can create, rename, move, upload, and delete items;
-- `VIEWER`: can browse, search, and preview only.
+Roles:
 
-The UI shows each data room with the current user's role so access is explicit.
+- `OWNER`: full control, including access management and data room deletion;
+- `EDITOR`: can create, upload, rename, move, and delete folders/files;
+- `VIEWER`: can browse, search, preview, and open files only.
+
+Why:
+
+These three roles are enough to model the expected data room workflow without overcomplicating the UI.
+
+How:
+
+- `dataroom_access` stores direct user access.
+- Backend service methods call `requireRole(...)` before reading or mutating room data.
+- The frontend disables write controls when the current role is not `OWNER` or `EDITOR`.
+- The owner access record cannot be removed or reassigned through the access endpoint.
+
+Trade-off:
+
+The UI disables unavailable actions for usability, but backend checks remain the real security boundary.
 
 ## Public Data-room Access
 
-The "available to everyone" option is stored as `datarooms.public_role`, not as generated access rows for every user. This makes the rule apply to future users created after the owner enables public access.
+The "available to everyone" option is stored as `datarooms.public_role`, not as generated access rows for every user.
+
+Why:
+
+If the owner marks a data room as available to everyone, the rule should also apply to users created later. Creating access rows only for existing users would make future users silently miss that data room.
+
+How:
+
+- `publicRole` was added to the Prisma `Dataroom` model.
+- `listDatarooms(...)` returns both direct-access rooms and public rooms.
+- Direct access wins when a user has both direct and public access.
+- `requireRole(...)` checks direct access first, then public access.
+- Public access can be `VIEWER`, `EDITOR`, or `null`.
+- Public `OWNER` is rejected.
+
+Trade-off:
+
+Public access is simple and effective, but it is global. A production system might add organization/team scopes instead of "everyone in the whole app".
+
+## Access Management UI
+
+Access management is opened from the data room context menu instead of a top-right global button.
+
+Why:
+
+Access belongs to a specific data room. Opening access from right-click on the data room makes the target explicit and matches the Google Drive mental model.
+
+How:
+
+- Right-clicking a data room opens a context menu.
+- Owners see `Manage access`.
+- The access dialog shows:
+  - public access selector;
+  - search by user name/email;
+  - per-user role selectors.
+- The right panel shows the current public/direct access state.
+
+Trade-off:
+
+Radix Select is used for role selection. It behaves well in browsers, but jsdom tests needed browser API shims for pointer and scroll methods.
+
+## Blob Storage
+
+PDF bytes are stored on the filesystem in a Docker volume. PostgreSQL stores only metadata and the `blobKey`.
+
+Why:
+
+Storing binary PDFs directly in PostgreSQL would make the database heavier and less realistic for future cloud storage. File storage plus metadata is a practical middle ground.
+
+How:
+
+- Uploaded files are written to `UPLOAD_DIR`.
+- Docker mounts `upload-data` to `/app/uploads`.
+- Each PDF gets a generated blob key.
+- File content is streamed by `/api/files/:id/content`.
+
+Trade-off:
+
+Local volume storage is fine for the test task. Production should move blobs to S3-compatible storage, add virus scanning, object-level permissions, and signed URLs or a streaming proxy with stricter token handling.
+
+## PDF Upload and Sanitized Indexing
+
+PDF upload accepts only `application/pdf` files and indexes readable text.
+
+Why:
+
+The core task is a PDF data room. Searching by filename only is not enough, so upload also tries to extract searchable PDF content.
+
+How:
+
+- Multer receives uploaded files in memory.
+- The backend rejects non-PDF files.
+- The backend writes valid PDFs to blob storage.
+- `extractPdfText(...)` extracts simple readable PDF strings and bytes.
+- `normalizeSearchText(...)` lowercases and normalizes whitespace.
+- Control characters, including NUL bytes, are removed before saving text to PostgreSQL.
+
+Why NUL-byte sanitizing was added:
+
+Real resume PDFs contained `0x00` characters in extracted text. PostgreSQL text fields reject NUL bytes, which caused upload to fail with `invalid byte sequence for encoding "UTF8": 0x00`. The fix sanitizes indexed text before database writes.
+
+Trade-off:
+
+The indexer is lightweight. It works for readable PDFs, including the provided resume PDFs, but scanned/image-only PDFs still require OCR.
+
+## Search
+
+Search checks both item names and indexed PDF text.
+
+Why:
+
+Users naturally expect search to find both a file name and content inside a PDF.
+
+How:
+
+- Upload stores normalized text in `items.searchText`.
+- The list endpoint accepts `?q=...`.
+- The backend filters by item name or indexed text.
+- The frontend top search calls the backend list endpoint with the query.
+
+Trade-off:
+
+The current search is deliberately simple. Ranking, snippets, typo tolerance, phrase search, and OCR are out of scope for the MVP.
+
+## Folder and File Tree
+
+Folders and files share one `items` table with a `type` field and `parentId`.
+
+Why:
+
+Folders and files live in the same hierarchy. A shared table makes moving, listing, deleting descendants, and rendering breadcrumbs simpler.
+
+How:
+
+- `ItemType.FOLDER` represents folders.
+- `ItemType.FILE` represents PDFs.
+- `parentId` points to another item.
+- `moveItem(...)` prevents moving a folder into itself or its descendant.
+- Deleting a folder deletes its descendants and stored blobs.
+
+Trade-off:
+
+Tree operations are implemented in application code. For very large trees, recursive SQL queries or a closure table could be better.
+
+## Filters and Sorting
+
+The fake Google Drive-like controls were replaced with working filters and sorting.
+
+Why:
+
+Non-working UI controls are worse than missing controls. The UI should only show interactions that do something real.
+
+How:
+
+- Removed inactive view toggle buttons.
+- Removed unused sidebar items such as storage and drive shortcuts.
+- Added working `Type` filter:
+  - all;
+  - folders;
+  - PDF files.
+- Added working `Modified` filter:
+  - any time;
+  - today;
+  - last 7 days;
+  - last 30 days.
+- Table headers now sort by:
+  - name;
+  - owner;
+  - modification date;
+  - file size.
+
+Trade-off:
+
+Sorting and filtering currently happen on the already loaded client-side item list. For very large data rooms, these should move to backend query parameters with pagination.
 
 ## Full-window Viewer
 
-PDFs open in an in-app fullscreen Radix dialog with an iframe pointing to the backend file stream. The token can be passed as a query parameter because browser iframes cannot attach custom authorization headers.
+PDFs open in an in-app fullscreen Radix dialog with an iframe pointing to the backend file stream.
+
+Why:
+
+The user asked to open files in a full window, but still inside the app UI. A modal viewer keeps the user in the data room instead of navigating away to a browser PDF tab.
+
+How:
+
+- Selecting a PDF shows metadata and preview in the right panel.
+- `Open in viewer` opens a fullscreen dialog.
+- The iframe uses `/api/files/:id/content?token=...`.
+
+Trade-off:
+
+The token is passed in the query string because iframe requests cannot attach custom authorization headers. Production should avoid long-lived query tokens and prefer short-lived signed file access tokens.
 
 ## UI Direction
 
-The layout follows familiar Google Drive patterns: sidebar, top search, breadcrumb navigation, table, details panel, access panel, and fullscreen preview. The visual language is intentionally not a brand clone: it uses a Cyberpunk 2077-inspired palette with yellow, cyan, magenta, and dark panels.
+The layout follows familiar Google Drive patterns while keeping the app's cyberpunk theme.
 
-## Test Cases Workbook
+Why:
 
-Manual QA scenarios are stored in `docs/test-cases.xlsx`. The workbook covers auth, user creation, roles, direct access, public access, data rooms, folders, files, moves, search, viewer, PostgreSQL persistence, blob persistence, Docker, and CI.
+The user explicitly wanted a Google Drive-like layout but not Google colors. Familiar layout improves usability because users already understand sidebar, breadcrumbs, table rows, details panel, and context menus.
+
+How:
+
+- Left sidebar contains creation and data rooms only.
+- Top bar contains global data-room search.
+- Main content uses breadcrumbs: data room -> folders -> file.
+- Folder navigation has a back button.
+- Right panel shows role, current access, and selected-file metadata.
+- Styling keeps the existing Cyberpunk 2077-inspired palette and rounded corners.
+
+Trade-off:
+
+The app borrows interaction patterns, not brand assets. It is intentionally not a pixel-perfect clone of Google Drive.
+
+## Test Data
+
+Real resume PDFs are stored in `test-assets/resumes`.
+
+Why:
+
+The upload bug appeared only with real PDF files, not with tiny artificial test files. Keeping real PDF fixtures makes this regression easy to reproduce.
+
+How:
+
+- Six resume versions are included:
+  - backend;
+  - full-stack;
+  - JavaScript;
+  - Node.js;
+  - Python;
+  - web.
+- Manual test cases reference these files.
+- Browser QA uploaded all six through the UI file picker.
+
+Trade-off:
+
+The repository becomes larger because binary fixtures are committed. The benefit is realistic repeatable upload testing.
+
+## Testing Strategy
+
+Testing is layered.
+
+Automated checks:
+
+- TypeScript typecheck;
+- ESLint;
+- Vitest unit tests;
+- React UI tests;
+- production build;
+- GitHub Actions CI.
+
+Manual checks:
+
+- clean Docker startup with migrations;
+- API upload of all resume PDFs;
+- browser UI walkthrough:
+  - login;
+  - user creation;
+  - data room creation;
+  - folder creation;
+  - access dialog from right-click;
+  - user search in access dialog;
+  - public access;
+  - PDF upload;
+  - filters;
+  - sorting;
+  - fullscreen viewer.
+
+Why:
+
+Automated tests catch regressions quickly. Manual browser checks catch integration and layout issues that unit tests often miss.
+
+## CI and GitFlow
+
+The repository uses a GitFlow-like workflow:
+
+- feature branch;
+- local validation;
+- push feature branch;
+- CI on feature branch;
+- merge into `dev`;
+- CI on `dev`;
+- merge into `master`;
+- CI on `master`.
+
+Why:
+
+This gives clear checkpoints and keeps `master` as the final stable branch.
+
+How:
+
+- GitHub Actions runs lint, typecheck, tests, and build.
+- CI runs for `master`, `dev`, `feature/**`, `fix/**`, and `codex/**`.
+- `codex/**` was added because Codex-created branches use that prefix.
+
+Trade-off:
+
+This is an imitation of PR flow through merge commits, not a full protected-branch setup. Production should use required checks and branch protection rules.
+
+## Known Limits and Future Improvements
+
+Important remaining limits:
+
+- Auth is demo-grade.
+- Search has no OCR.
+- File tokens in iframe URLs should become short-lived signed tokens.
+- No audit log for access changes.
+- No pagination for large folders.
+- No drag-and-drop upload yet.
+- No team/organization-level access groups.
+- No cloud blob storage.
+- No virus scanning for uploaded files.
+
+These were left out because the test task needed a focused full-stack MVP, not a full enterprise data room platform.
