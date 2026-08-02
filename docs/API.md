@@ -44,6 +44,22 @@ Response:
 }
 ```
 
+### POST `/auth/register`
+
+Creates a user and returns a session token.
+
+Request:
+
+```json
+{
+  "email": "new.user@example.test",
+  "name": "New User",
+  "password": "new123"
+}
+```
+
+Response matches `/auth/login`.
+
 ### GET `/auth/me`
 
 Returns the current authenticated user.
@@ -58,7 +74,7 @@ Returns demo users for the owner access-management UI.
 
 ### GET `/datarooms`
 
-Returns only data rooms where the current user has access.
+Returns only data rooms where the current user has direct access or where public access is enabled.
 
 Each data room includes the current user's role:
 
@@ -151,6 +167,24 @@ Streams a PDF file inline if the user has access to the data room.
 ### GET `/datarooms/:id/access`
 
 Returns access records. Owner only.
+
+### PUT `/datarooms/:id/public-access`
+
+Sets or removes public access for all current and future users. Owner only.
+
+Request:
+
+```json
+{
+  "role": "VIEWER"
+}
+```
+
+Allowed values:
+
+- `EDITOR`
+- `VIEWER`
+- `null` to disable public access
 
 ### PUT `/datarooms/:id/access/:userId`
 

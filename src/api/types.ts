@@ -10,6 +10,7 @@ export interface Dataroom {
   id: string;
   name: string;
   ownerId: string;
+  publicRole: DataroomRole | null;
   owner?: User;
   role: DataroomRole;
   createdAt: string;

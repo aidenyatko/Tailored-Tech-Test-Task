@@ -26,6 +26,13 @@ export async function login(email: string, password: string) {
   });
 }
 
+export async function register(email: string, name: string, password: string) {
+  return apiFetch<{ token: string; user: User }>("/api/auth/register", {
+    method: "POST",
+    body: JSON.stringify({ email, name, password })
+  });
+}
+
 export async function me(token: string) {
   return apiFetch<{ user: User }>("/api/auth/me", { token });
 }
@@ -115,6 +122,14 @@ export async function listAccess(token: string, dataroomId: string) {
 
 export async function updateAccess(token: string, dataroomId: string, userId: string, role: DataroomRole | null) {
   return apiFetch<{ access: AccessRecord[] }>(`/api/datarooms/${dataroomId}/access/${userId}`, {
+    method: "PUT",
+    token,
+    body: JSON.stringify({ role })
+  });
+}
+
+export async function updatePublicAccess(token: string, dataroomId: string, role: DataroomRole | null) {
+  return apiFetch<{ dataroom: Dataroom }>(`/api/datarooms/${dataroomId}/public-access`, {
     method: "PUT",
     token,
     body: JSON.stringify({ role })
