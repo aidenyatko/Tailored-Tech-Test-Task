@@ -7,7 +7,16 @@ export function extractPdfText(buffer: Buffer) {
 }
 
 export function normalizeSearchText(value: string) {
-  return String(value ?? "").toLowerCase().replace(/\s+/g, " ").trim();
+  return String(value ?? "")
+    .split("")
+    .map((character) => {
+      const code = character.charCodeAt(0);
+      return code === 127 || (code < 32 && ![9, 10, 13].includes(code)) ? " " : character;
+    })
+    .join("")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function decodePdfString(value: string) {

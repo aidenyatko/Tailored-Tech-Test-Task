@@ -12,6 +12,11 @@ export class AuthController {
     return this.authService.login(body.email, body.password);
   }
 
+  @Post("register")
+  register(@Body() body: { email: string; name: string; password: string }) {
+    return this.authService.register(body.email, body.name, body.password);
+  }
+
   @Get("me")
   @UseGuards(AuthGuard)
   me(@CurrentUser() user: { id: string; email: string; name: string }) {

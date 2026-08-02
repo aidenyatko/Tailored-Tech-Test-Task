@@ -49,6 +49,10 @@ Each data room has access records:
 
 The UI shows each data room with the current user's role so access is explicit.
 
+## Public Data-room Access
+
+The "available to everyone" option is stored as `datarooms.public_role`, not as generated access rows for every user. This makes the rule apply to future users created after the owner enables public access.
+
 ## Full-window Viewer
 
 PDFs open in an in-app fullscreen Radix dialog with an iframe pointing to the backend file stream. The token can be passed as a query parameter because browser iframes cannot attach custom authorization headers.
@@ -59,4 +63,4 @@ The layout follows familiar Google Drive patterns: sidebar, top search, breadcru
 
 ## Test Cases Workbook
 
-Manual QA scenarios are stored in `docs/test-cases.xlsx`. The workbook covers auth, roles, data rooms, folders, files, moves, search, viewer, PostgreSQL persistence, blob persistence, Docker, and CI.
+Manual QA scenarios are stored in `docs/test-cases.xlsx`. The workbook covers auth, user creation, roles, direct access, public access, data rooms, folders, files, moves, search, viewer, PostgreSQL persistence, blob persistence, Docker, and CI.

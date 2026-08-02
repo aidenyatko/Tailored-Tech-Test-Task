@@ -105,6 +105,15 @@ export class DataroomsController {
     return { access: await this.dataroomsService.listAccess(user.id, id) };
   }
 
+  @Put("datarooms/:id/public-access")
+  async updatePublicAccess(
+    @CurrentUser() user: { id: string },
+    @Param("id") id: string,
+    @Body() body: { role: DataroomRole | null }
+  ) {
+    return { dataroom: await this.dataroomsService.updatePublicAccess(user.id, id, body.role) };
+  }
+
   @Put("datarooms/:id/access/:userId")
   async updateAccess(
     @CurrentUser() user: { id: string },
