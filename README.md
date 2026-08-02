@@ -2,7 +2,7 @@
 
 Cyberpunk-themed data room MVP for due-diligence PDF workflows.
 
-The implementation follows the Tailored Tech job stack direction:
+The implementation uses a practical full-stack JavaScript architecture:
 
 - React 18 + TypeScript
 - TanStack Query and TanStack Table
@@ -19,7 +19,7 @@ The implementation follows the Tailored Tech job stack direction:
 - Email/password demo authentication with user creation from the login screen.
 - Data rooms visible only to users with access.
 - Owner, editor, and viewer roles with direct or public data-room access.
-- Owner access management per data room through the data-room context menu.
+- Owner access management per selected data room.
 - Create, rename, and delete data rooms.
 - Create nested folders.
 - Upload PDF files into blob storage.
@@ -30,7 +30,7 @@ The implementation follows the Tailored Tech job stack direction:
 - Search by file/folder name and indexed PDF text.
 - Cyberpunk 2077-inspired color system over a Google Drive-like workspace layout.
 - Test cases workbook: `docs/test-cases.xlsx`.
-- Real PDF resume fixtures for upload testing: `test-assets/resumes`.
+- Real PDF fixtures for upload testing: `test-assets/resumes`.
 
 ## Demo Accounts
 
@@ -93,7 +93,7 @@ See [docs/test-cases.xlsx](docs/test-cases.xlsx).
 
 ## Upload Test Files
 
-Use PDFs from [test-assets/resumes](test-assets/resumes) for manual upload checks. The primary resume is `Dmytro_Kiselov_Full-Stack_Developer.pdf`.
+Use PDFs from [test-assets/resumes](test-assets/resumes) for manual upload checks. The primary sample file is `Dmytro_Kiselov_Full-Stack_Developer.pdf`.
 
 ## Notes
 

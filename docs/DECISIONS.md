@@ -18,9 +18,9 @@ The product goal is not just local file storage. The useful workflow is:
 
 This shaped the architecture. A browser-only IndexedDB app would be simpler, but it cannot safely model shared access, ownership, public access, server-side search, or persistent blob metadata between users.
 
-## Stack Alignment
+## Stack Choice
 
-The backend was moved to NestJS, Prisma, and PostgreSQL to align with the Tailored Tech stack from the referenced job post. The frontend keeps React 18, TypeScript, Tailwind, TanStack Query, TanStack Table, and Radix-style primitives.
+The application uses NestJS, Prisma, PostgreSQL, React 18, TypeScript, Tailwind, TanStack Query, TanStack Table, and Radix-style primitives.
 
 Why:
 
@@ -30,6 +30,8 @@ Why:
 - React with TanStack Query keeps server state explicit and avoids hand-written fetch/cache logic across the UI.
 - TanStack Table makes table rendering easier to extend with real sorting and later pagination.
 - Radix primitives provide accessible dialogs and select controls without building low-level behavior by hand.
+
+This stack is a good fit globally because the app has two connected responsibilities: a transactional backend with access rules and a dense browser UI with server-driven data. NestJS and PostgreSQL keep permissions, sessions, and file metadata centralized on the server. React and TanStack Query keep the interface responsive without duplicating backend state by hand.
 
 How:
 
@@ -180,16 +182,15 @@ Public access is simple and effective, but it is global. A production system mig
 
 ## Access Management UI
 
-Access management is opened from the data room context menu instead of a top-right global button.
+Access management belongs to the currently selected data room.
 
 Why:
 
-Access belongs to a specific data room. Opening access from right-click on the data room makes the target explicit and matches the Google Drive mental model.
+Access is not a global application setting. It is always tied to one data room, so the UI keeps the selected data room as the target and shows its access state in the right panel.
 
 How:
 
-- Right-clicking a data room opens a context menu.
-- Owners see `Manage access`.
+- Owners can open access management for the selected data room.
 - The access dialog shows:
   - public access selector;
   - search by user name/email;
@@ -238,11 +239,11 @@ How:
 
 Why NUL-byte sanitizing was added:
 
-Real resume PDFs contained `0x00` characters in extracted text. PostgreSQL text fields reject NUL bytes, which caused upload to fail with `invalid byte sequence for encoding "UTF8": 0x00`. The fix sanitizes indexed text before database writes.
+Some real PDF files contained `0x00` characters in extracted text. PostgreSQL text fields reject NUL bytes, so the indexer sanitizes text before database writes.
 
 Trade-off:
 
-The indexer is lightweight. It works for readable PDFs, including the provided resume PDFs, but scanned/image-only PDFs still require OCR.
+The indexer is lightweight. It works for readable PDFs, including the provided sample PDFs, but scanned/image-only PDFs still require OCR.
 
 ## Search
 
@@ -285,7 +286,7 @@ Tree operations are implemented in application code. For very large trees, recur
 
 ## Filters and Sorting
 
-The fake Google Drive-like controls were replaced with working filters and sorting.
+The file table includes working filters and sorting.
 
 Why:
 
@@ -293,13 +294,13 @@ Non-working UI controls are worse than missing controls. The UI should only show
 
 How:
 
-- Removed inactive view toggle buttons.
-- Removed unused sidebar items such as storage and drive shortcuts.
-- Added working `Type` filter:
+- The sidebar stays focused on data rooms and creation.
+- The UI avoids inactive view toggle buttons.
+- `Type` filter:
   - all;
   - folders;
   - PDF files.
-- Added working `Modified` filter:
+- `Modified` filter:
   - any time;
   - today;
   - last 7 days;
@@ -320,7 +321,7 @@ PDFs open in an in-app fullscreen Radix dialog with an iframe pointing to the ba
 
 Why:
 
-The user asked to open files in a full window, but still inside the app UI. A modal viewer keeps the user in the data room instead of navigating away to a browser PDF tab.
+The viewer is part of the data-room workflow. It keeps the user inside the application while still giving the PDF enough space for reading.
 
 How:
 
@@ -338,7 +339,7 @@ The layout follows familiar Google Drive patterns while keeping the app's cyberp
 
 Why:
 
-The user explicitly wanted a Google Drive-like layout but not Google colors. Familiar layout improves usability because users already understand sidebar, breadcrumbs, table rows, details panel, and context menus.
+The layout follows a familiar file-manager model because users already understand sidebars, breadcrumbs, table rows, and details panels. The color direction is Cyberpunk 2077-inspired because it was a playful product choice for this project: the familiar structure stays easy to use, while the visual style feels less generic than a plain Google Drive clone.
 
 How:
 
@@ -347,7 +348,7 @@ How:
 - Main content uses breadcrumbs: data room -> folders -> file.
 - Folder navigation has a back button.
 - Right panel shows role, current access, and selected-file metadata.
-- Styling keeps the existing Cyberpunk 2077-inspired palette and rounded corners.
+- Styling uses a Cyberpunk 2077-inspired palette and rounded corners.
 
 Trade-off:
 
@@ -355,15 +356,15 @@ The app borrows interaction patterns, not brand assets. It is intentionally not 
 
 ## Test Data
 
-Real resume PDFs are stored in `test-assets/resumes`.
+Real PDF fixtures are stored in `test-assets/resumes`.
 
 Why:
 
-The upload bug appeared only with real PDF files, not with tiny artificial test files. Keeping real PDF fixtures makes this regression easy to reproduce.
+Real PDF fixtures are useful because they contain the kind of binary structure and extracted text artifacts that small artificial files often miss. They make upload and indexing checks closer to real use.
 
 How:
 
-- Six resume versions are included:
+- Six sample PDFs are included:
   - backend;
   - full-stack;
   - JavaScript;
@@ -393,13 +394,13 @@ Automated checks:
 Manual checks:
 
 - clean Docker startup with migrations;
-- API upload of all resume PDFs;
+- API upload of all sample PDFs;
 - browser UI walkthrough:
   - login;
   - user creation;
   - data room creation;
   - folder creation;
-  - access dialog from right-click;
+  - access management;
   - user search in access dialog;
   - public access;
   - PDF upload;
