@@ -19,6 +19,16 @@ IndexedDB was useful for the first MVP, but access control and shared data rooms
 
 The Docker startup runs `prisma migrate deploy` before starting NestJS. The first migration creates tables, relations, and trigram GIN indexes for search-friendly fields.
 
+## Split Docker Services
+
+Docker Compose runs three services:
+
+- `frontend`: nginx serves the Vite build on host port `8080`;
+- `backend`: NestJS runs inside the Docker network on port `8080`;
+- `postgres`: PostgreSQL stores application state on host port `5438`.
+
+The frontend service proxies `/api/*` to `backend:8080`, so the browser still uses one origin while the frontend and backend remain separately deployable containers.
+
 ## Blob Storage
 
 PDF bytes are stored on the filesystem in a Docker volume. PostgreSQL stores the `blobKey`, metadata, and extracted text. This keeps the database lean and makes future S3-compatible storage migration straightforward.
