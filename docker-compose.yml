@@ -1,7 +1,30 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: dataroom
+      POSTGRES_USER: dataroom
+      POSTGRES_PASSWORD: dataroom
+    ports:
+      - "5438:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
   app:
     build:
       context: .
       dockerfile: Dockerfile
+    depends_on:
+      - postgres
+    environment:
+      DATABASE_URL: postgresql://dataroom:dataroom@postgres:5432/dataroom?schema=public
+      UPLOAD_DIR: /app/uploads
+      PUBLIC_ROOT: /app/dist
     ports:
       - "8080:8080"
+    volumes:
+      - upload-data:/app/uploads
+
+volumes:
+  postgres-data:
+  upload-data:

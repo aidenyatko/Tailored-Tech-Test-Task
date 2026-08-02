@@ -1,0 +1,94 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum DataroomRole {
+  OWNER
+  EDITOR
+  VIEWER
+}
+
+enum ItemType {
+  FOLDER
+  FILE
+}
+
+model User {
+  id           String           @id @default(uuid())
+  email        String           @unique
+  name         String
+  passwordHash String
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  sessions     Session[]
+  ownedRooms   Dataroom[]       @relation("DataroomOwner")
+  access       DataroomAccess[]
+
+  @@map("users")
+}
+
+model Session {
+  token     String   @id
+  userId    String
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+model Dataroom {
+  id        String           @id @default(uuid())
+  name      String
+  ownerId   String
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+  owner     User             @relation("DataroomOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  access    DataroomAccess[]
+  items     Item[]
+
+  @@index([ownerId])
+  @@map("datarooms")
+}
+
+model DataroomAccess {
+  id         String       @id @default(uuid())
+  dataroomId String
+  userId     String
+  role       DataroomRole
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+  dataroom   Dataroom     @relation(fields: [dataroomId], references: [id], onDelete: Cascade)
+  user       User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([dataroomId, userId])
+  @@index([userId])
+  @@map("dataroom_access")
+}
+
+model Item {
+  id         String   @id @default(uuid())
+  dataroomId String
+  parentId   String?
+  type       ItemType
+  name       String
+  mimeType   String?
+  size       Int?
+  blobKey    String?
+  searchText String   @default("")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  dataroom   Dataroom @relation(fields: [dataroomId], references: [id], onDelete: Cascade)
+  parent     Item?    @relation("ItemTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children   Item[]   @relation("ItemTree")
+
+  @@index([dataroomId])
+  @@index([parentId])
+  @@index([blobKey])
+  @@map("items")
+}
