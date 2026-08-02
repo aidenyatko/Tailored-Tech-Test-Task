@@ -249,14 +249,15 @@ async function readMultipart(request) {
 
     const headerText = part.slice(0, separator);
     const content = part.slice(separator + 4).replace(/\r\n$/, "");
-    const disposition = /content-disposition:\s*form-data;\s*name="([^"]+)"(?:;\s*filename="([^"]*)")?/i.exec(headerText);
+    const disposition = parseContentDisposition(headerText);
     const mimeType = /content-type:\s*([^\r\n]+)/i.exec(headerText)?.[1]?.trim() ?? "application/octet-stream";
 
     if (!disposition) {
       continue;
     }
 
-    const [, name, filename] = disposition;
+    const name = disposition.name;
+    const filename = disposition.filename;
 
     if (filename) {
       files.push({
@@ -275,6 +276,35 @@ async function readMultipart(request) {
   }
 
   return { fields, files };
+}
+
+function parseContentDisposition(headerText) {
+  const line = /content-disposition:\s*form-data;([^\r\n]+)/i.exec(headerText)?.[1];
+
+  if (!line) {
+    return null;
+  }
+
+  const params = {};
+
+  for (const part of line.split(";")) {
+    const [rawKey, ...rawValue] = part.trim().split("=");
+
+    if (!rawKey || rawValue.length === 0) {
+      continue;
+    }
+
+    params[rawKey.toLowerCase()] = rawValue.join("=").trim().replace(/^"|"$/g, "");
+  }
+
+  if (!params.name) {
+    return null;
+  }
+
+  return {
+    name: params.name,
+    filename: params.filename ?? params["filename*"] ?? ""
+  };
 }
 
 async function readBody(request) {
