@@ -1,6 +1,8 @@
 node_modules
 dist
 coverage
+server-data
+uploads
 .git
 .github
 .npm-cache
