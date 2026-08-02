@@ -1,51 +1,52 @@
 # Architecture Decisions
 
-## Frontend-Only MVP
+## Stack Alignment
 
-The task allows mocked CRUD storage, so the MVP is a React SPA with local IndexedDB persistence. This keeps setup simple and lets reviewers run the full product without database credentials or a backend server.
+The backend was moved to NestJS, Prisma, and PostgreSQL to align with the Tailored Tech stack from the job post. The frontend keeps React 18, TypeScript, Tailwind, and now uses TanStack Query/Table with Radix/shadcn-style primitives.
 
-## IndexedDB Storage
+## PostgreSQL as Source of Truth
 
-IndexedDB was chosen over `localStorage` because uploaded PDF files can be large binary objects. Metadata and file bytes are separated:
+IndexedDB was useful for the first MVP, but access control and shared data rooms need server-side state. PostgreSQL now stores:
 
-- `datarooms`: top-level workspaces.
-- `items`: folders and files.
-- `blobs`: PDF bytes referenced by `FileItem.storageKey`.
+- users;
+- sessions;
+- data rooms;
+- access records;
+- folder/file metadata;
+- indexed PDF text.
 
-The app stores PDF bytes as `ArrayBuffer` and rebuilds a `Blob` for preview. This is predictable in browsers and easier to test than storing `File` instances directly.
+## Prisma Migrations
 
-## Tree Model
+The Docker startup runs `prisma migrate deploy` before starting NestJS. The first migration creates tables, relations, and trigram GIN indexes for search-friendly fields.
 
-Folders and files are stored as flat records with `parentId`. Root-level items use `parentId: null`.
+## Blob Storage
 
-This makes common operations straightforward:
+PDF bytes are stored on the filesystem in a Docker volume. PostgreSQL stores the `blobKey`, metadata, and extracted text. This keeps the database lean and makes future S3-compatible storage migration straightforward.
 
-- list current folder by filtering `parentId`;
-- build breadcrumbs by walking parents;
-- delete a folder by collecting descendant ids;
-- search across the full active data room.
+## Search and Indexing
 
-## Name Handling
+On upload, the backend extracts readable PDF text and stores normalized text in `items.searchText`. PostgreSQL trigram indexes are added for file names and indexed text. This gives name search and basic content search without adding a separate search engine.
 
-The app prevents ambiguous sibling names. Manual rename returns a validation error on duplicates, while creation and upload generate safe suffixes. That gives a smooth upload flow without silently overwriting files.
+Limit: scanned/image PDFs need OCR for complete content search.
 
-## PDF-Only Uploads
+## Authorization Model
 
-The MVP accepts only `application/pdf`, matching the functional requirement. Other file types are rejected before persistence.
+Each data room has access records:
 
-## No Authentication
+- `OWNER`: full control, including access management;
+- `EDITOR`: can create, rename, move, upload, and delete items;
+- `VIEWER`: can browse, search, and preview only.
 
-Authentication is optional in the task. It is intentionally out of scope for this MVP so the core document management workflow is complete and easy to review.
+The UI shows each data room with the current user's role so access is explicit.
 
-## Deployment
+## Full-window Viewer
 
-The app is prepared for Vercel as a static Vite deployment. Docker is included for local production validation with Nginx.
+PDFs open in an in-app fullscreen Radix dialog with an iframe pointing to the backend file stream. The token can be passed as a query parameter because browser iframes cannot attach custom authorization headers.
 
-## Testing Strategy
+## UI Direction
 
-The test suite focuses on the riskiest behavior:
+The layout follows familiar Google Drive patterns: sidebar, top search, breadcrumb navigation, table, details panel, access panel, and fullscreen preview. The visual language is intentionally not a brand clone: it uses a Cyberpunk 2077-inspired palette with yellow, cyan, magenta, and dark panels.
 
-- domain name normalization and duplicate handling;
-- tree traversal and cascade deletion;
-- IndexedDB storage rules;
-- React user flows for create, upload, search, preview, and delete.
+## Test Cases Workbook
+
+Manual QA scenarios are stored in `docs/test-cases.xlsx`. The workbook covers auth, roles, data rooms, folders, files, moves, search, viewer, PostgreSQL persistence, blob persistence, Docker, and CI.

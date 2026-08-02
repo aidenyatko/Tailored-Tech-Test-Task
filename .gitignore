@@ -1,6 +1,9 @@
 node_modules
 dist
+dist-server
 coverage
+uploads
+server-data
 .env
 .env.local
 .npm-cache

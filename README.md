@@ -1,93 +1,95 @@
-# Acme Data Room
+# Tailored Tech Data Room
 
-A frontend-only data room MVP for organizing due-diligence PDF documents in a browser workspace.
+Cyberpunk-themed data room MVP for due-diligence PDF workflows.
 
-## What It Does
+The implementation follows the Tailored Tech job stack direction:
 
-- Create multiple data rooms.
-- Create folders and nested folders.
-- Upload PDF files.
-- Preview uploaded PDFs in the UI.
-- Rename data rooms, folders, and files.
-- Delete a folder with all nested folders and files.
-- Search files and folders by name across the active data room.
-- Persist data locally in IndexedDB.
-
-## Tech Stack
-
-- React 18
-- TypeScript
-- Vite
+- React 18 + TypeScript
+- TanStack Query and TanStack Table
+- Radix/shadcn-style UI primitives
 - Tailwind CSS
-- IndexedDB via `idb`
-- Vitest and Testing Library
-- Docker with Nginx for production preview
-- GitHub Actions CI
+- NestJS
+- Prisma + PostgreSQL
+- ts-rest contract definitions
+- Vitest
+- Docker Compose
 
-## Requirements
+## Features
 
-- Node.js 22
-- npm 10+
-- Docker Desktop for the containerized production preview
+- Email/password demo authentication.
+- Data rooms visible only to users with access.
+- Owner, editor, and viewer roles.
+- Owner access management per data room.
+- Create, rename, and delete data rooms.
+- Create nested folders.
+- Upload PDF files into blob storage.
+- Store metadata, roles, sessions, and file index data in PostgreSQL.
+- Rename, delete, and move folders/files.
+- Preview PDF files in the details panel.
+- Open PDFs in a full-window in-app viewer.
+- Search by file/folder name and indexed PDF text.
+- Cyberpunk 2077-inspired color system over a Google Drive-like workspace layout.
+- Test cases workbook: `docs/test-cases.xlsx`.
+
+## Demo Accounts
+
+| Role | Email | Password |
+|---|---|---|
+| Owner | `owner@acme.test` | `owner123` |
+| Editor | `editor@acme.test` | `editor123` |
+| Viewer | `viewer@acme.test` | `viewer123` |
+
+## One-command Run
+
+```powershell
+docker compose up -d --build
+```
+
+Open:
+
+```text
+http://localhost:8080
+```
+
+The command starts:
+
+- PostgreSQL on host port `5438`
+- NestJS API and frontend on host port `8080`
+- Prisma migrations
+- default demo-user seeding
+
+Stop and remove containers/volumes:
+
+```powershell
+docker compose down -v
+```
+
+## Local Checks
 
 On Windows PowerShell, use `npm.cmd` if `npm` is blocked by execution policy.
 
-## Local Setup
-
 ```powershell
 npm.cmd install
-npm.cmd run dev
-```
-
-The dev server starts on `http://localhost:5173`.
-
-## Validation
-
-```powershell
 npm.cmd run lint
 npm.cmd run typecheck
 npm.cmd run test:ci
 npm.cmd run build
 ```
 
-## Production Preview
+## API
 
-```powershell
-npm.cmd run build
-npm.cmd run preview
-```
+See [docs/API.md](docs/API.md).
 
-The preview server starts on `http://localhost:4173`.
+## Decisions
 
-## Docker
+See [docs/DECISIONS.md](docs/DECISIONS.md).
 
-```powershell
-docker compose down -v
-docker compose up -d --build
-```
+## Manual Test Cases
 
-The app is served on `http://localhost:8080`.
-
-## Vercel
-
-This repository is ready for Vercel as a static Vite app.
-
-Recommended settings:
-
-- Build command: `npm run build`
-- Output directory: `dist`
-- Install command: `npm ci`
-
-The included `vercel.json` keeps single-page app routing working by rewriting all routes to `index.html`.
+See [docs/test-cases.xlsx](docs/test-cases.xlsx).
 
 ## Notes
 
-- Files are stored locally in the user's browser. They are not uploaded to a server.
-- Only PDF uploads are accepted.
-- Duplicate uploaded file names are renamed safely, for example `Report (1).pdf`.
-- Manual rename to an existing sibling name is blocked to avoid ambiguity.
-
-## Documentation
-
-- [Client API](docs/API.md)
-- [Architecture Decisions](docs/DECISIONS.md)
+- PDF text extraction is intentionally lightweight. It indexes simple text operands and readable PDF bytes. Scanned/image-only PDFs require OCR for full production-grade search.
+- Blob storage is local filesystem storage mounted as a Docker volume. It can be swapped for S3-compatible storage later.
+- Authentication is demo-grade and suitable for the test task, not a complete production identity system.

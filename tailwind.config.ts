@@ -5,16 +5,23 @@ export default {
   theme: {
     extend: {
       colors: {
-        ink: "#17202a",
-        steel: "#415466",
-        mist: "#e7eef4",
-        paper: "#f8fafc",
-        accent: "#0f766e",
-        warning: "#b45309",
-        danger: "#b91c1c"
+        void: "#07080d",
+        panel: "#11131f",
+        ghost: "#f5f7ff",
+        ink: "#f5f7ff",
+        steel: "#9aa4bd",
+        mist: "#28314a",
+        paper: "#11131f",
+        accent: "#fcee09",
+        "neon-yellow": "#fcee09",
+        "neon-cyan": "#00f0ff",
+        "neon-pink": "#ff2a6d",
+        "neon-lime": "#b8ff2c",
+        warning: "#f97316",
+        danger: "#ff2a6d"
       },
       boxShadow: {
-        panel: "0 14px 40px rgb(15 23 42 / 0.10)"
+        panel: "0 22px 70px rgb(0 240 255 / 0.14)"
       }
     }
   },
