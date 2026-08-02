@@ -54,8 +54,10 @@ http://localhost:8080
 The command starts:
 
 - PostgreSQL on host port `5438`
-- NestJS API and frontend on host port `8080`
-- Prisma migrations
+- NestJS API in the internal `backend` service
+- nginx static frontend on host port `8080`
+- `/api/*` proxying from `frontend` to `backend`
+- Prisma migrations in the `backend` service
 - default demo-user seeding
 
 Stop and remove containers/volumes:
