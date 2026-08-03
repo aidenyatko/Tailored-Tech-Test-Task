@@ -67,9 +67,34 @@ Stop and remove containers/volumes:
 docker compose down -v
 ```
 
+## Environment
+
+Copy [.env.example](.env.example) to `.env` when you want to override defaults.
+
+Important variables:
+
+- `VITE_DEMO_MODE=api` uses the real NestJS/PostgreSQL backend.
+- `VITE_DEMO_MODE=mock` uses the in-browser mock backend for Vercel/static hosting.
+- `VITE_DEFAULT_LOGIN_EMAIL`, `VITE_DEFAULT_LOGIN_PASSWORD`, and `VITE_DEMO_ACCOUNTS_TEXT` control the login screen defaults.
+- `BACKEND_DATABASE_URL`, `UPLOAD_DIR`, `POSTGRES_DB`, `POSTGRES_USER`, and `POSTGRES_PASSWORD` control the Docker backend/database setup.
+
 ## Hosted URL
 
-The task recommends Vercel for the hosted URL, but this implementation intentionally does not use Vercel for the submitted MVP.
+The GitHub repository contains the full-stack implementation with NestJS, PostgreSQL, Prisma migrations, and blob storage. The Vercel deployment is intended as a public frontend demo and should run with mocked browser data.
+
+Set this Vercel environment variable:
+
+```text
+VITE_DEMO_MODE=mock
+```
+
+Vercel build settings:
+
+```text
+Build Command: npm run frontend:build
+Output Directory: dist
+Install Command: npm ci
+```
 
 Why:
 
@@ -77,9 +102,10 @@ Why:
 - PostgreSQL is required for users, sessions, roles, folders, file metadata, and search index data;
 - PDF blobs need persistent storage;
 - the backend runs Prisma migrations before startup;
-- Docker Compose gives a reproducible end-to-end environment with frontend, backend, database, and blob volume in one command.
+- Docker Compose gives a reproducible end-to-end environment with frontend, backend, database, and blob volume in one command;
+- Vercel gives a convenient public URL for UX review when the app runs in `mock` mode.
 
-Vercel would be a good fit for the frontend part. For this architecture, a production deployment would split hosting: frontend on Vercel, backend on Render/Railway/Fly.io, PostgreSQL on Neon/Supabase/Railway, and PDF blobs in S3-compatible storage. For the test task, Docker Compose is kept as the clearest way to verify the complete system locally.
+For production, the app should be split: frontend on Vercel, backend on Render/Railway/Fly.io, PostgreSQL on Neon/Supabase/Railway, and PDF blobs in S3-compatible storage. For the test task, Docker Compose is kept as the clearest way to verify the complete backend system locally, while Vercel can host the mock-data demo.
 
 ## Local Checks
 

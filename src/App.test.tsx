@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
@@ -54,14 +54,12 @@ describe("App", () => {
     expect((await screen.findAllByText("Olivia Owner")).length).toBeGreaterThan(0);
   });
 
-  it("opens access management from a data room right click", async () => {
+  it("opens access management from the selected data room panel", async () => {
     const user = userEvent.setup();
     renderApp();
 
     await user.click(screen.getByRole("button", { name: "Sign in" }));
-    const dataRoomButtons = await screen.findAllByRole("button", { name: /Acme Deal/i });
-    fireEvent.contextMenu(dataRoomButtons[0]);
-    await user.click(await screen.findByRole("button", { name: "Manage access" }));
+    await user.click(await screen.findByRole("button", { name: "Manage" }));
 
     expect(await screen.findByRole("dialog", { name: "Manage data room access" })).toBeInTheDocument();
     expect(await screen.findByText("Val Viewer")).toBeInTheDocument();
@@ -86,9 +84,7 @@ describe("App", () => {
     renderApp();
 
     await user.click(screen.getByRole("button", { name: "Sign in" }));
-    const dataRoomButtons = await screen.findAllByRole("button", { name: /Acme Deal/i });
-    fireEvent.contextMenu(dataRoomButtons[0]);
-    await user.click(await screen.findByRole("button", { name: "Manage access" }));
+    await user.click(await screen.findByRole("button", { name: "Manage" }));
     const dialog = await screen.findByRole("dialog", { name: "Manage data room access" });
 
     await user.type(within(dialog).getByPlaceholderText("Search users"), "Val");
@@ -102,9 +98,7 @@ describe("App", () => {
     renderApp();
 
     await user.click(screen.getByRole("button", { name: "Sign in" }));
-    const dataRoomButtons = await screen.findAllByRole("button", { name: /Acme Deal/i });
-    fireEvent.contextMenu(dataRoomButtons[0]);
-    await user.click(await screen.findByRole("button", { name: "Manage access" }));
+    await user.click(await screen.findByRole("button", { name: "Manage" }));
     const dialog = await screen.findByRole("dialog", { name: "Manage data room access" });
     const publicRoleSelect = within(dialog).getAllByRole("combobox")[0];
 

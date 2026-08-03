@@ -114,9 +114,9 @@ Trade-off:
 
 The browser still talks to one origin, `http://localhost:8080`, because nginx proxies API requests. This avoids CORS complexity while keeping Docker services split internally.
 
-## Vercel Hosting Decision
+## Vercel Demo Hosting
 
-The task recommends Vercel for the hosted URL, but the MVP is submitted as a Docker Compose full-stack application instead of a Vercel deployment.
+The task recommends Vercel for the hosted URL. The repository keeps the full-stack Docker/NestJS/PostgreSQL implementation as the main product, and Vercel is used as a public frontend demo with mocked browser data.
 
 Why:
 
@@ -130,6 +130,13 @@ Using Vercel alone would leave several important parts outside the platform:
 - Prisma migrations need a controlled deployment step;
 - file streaming should remain behind backend authorization checks.
 
+How the submitted hosting is split:
+
+- GitHub contains the full implementation;
+- Docker Compose runs the real end-to-end system locally;
+- Vercel runs the frontend with `VITE_DEMO_MODE=mock`;
+- mock mode keeps data in browser storage and demonstrates the UX without external services.
+
 How this should be hosted in production:
 
 - frontend on Vercel;
@@ -138,13 +145,17 @@ How this should be hosted in production:
 - PDF blobs in S3-compatible storage;
 - environment variables shared between frontend and backend for API routing and auth configuration.
 
-Why Docker Compose is used for this submission:
+Why environment variables control the mode:
+
+The same frontend code can run against either the real API or the mock browser backend. `VITE_DEMO_MODE=api` keeps the Docker/full-stack behavior. `VITE_DEMO_MODE=mock` switches the deployed Vercel build to local demo data. This avoids maintaining a separate Vercel-only application.
+
+Why Docker Compose is still used for the full-stack submission:
 
 Docker Compose keeps the whole system reproducible from one command. It starts the frontend, backend, PostgreSQL, migrations, seeded demo users, and local blob volume together. That makes review easier because the evaluator can run the complete end-to-end product locally without wiring several external services first.
 
 Trade-off:
 
-The submission does not provide a public hosted URL. The benefit is that the delivered MVP is self-contained and easier to verify consistently. If a public demo is required, the architecture is ready to split across Vercel plus managed backend/database/blob providers.
+The Vercel URL is a demo surface, not the complete backend deployment. The benefit is speed and reviewability: the UX is publicly accessible, while the real backend, database, migrations, and blob behavior remain verifiable through Docker Compose. If a production public version is required, the architecture is ready to split across Vercel plus managed backend/database/blob providers.
 
 ## Authentication
 

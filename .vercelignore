@@ -1,0 +1,17 @@
+server
+prisma
+test-assets
+docs
+uploads
+server-data
+.codex-remote-attachments
+.docker
+.github
+Dockerfile.backend
+Dockerfile.frontend
+docker-compose.yml
+nginx.conf
+dist-server
+coverage
+playwright-report
+test-results

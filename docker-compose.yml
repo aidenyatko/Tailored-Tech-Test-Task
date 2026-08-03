@@ -6,7 +6,7 @@ services:
     depends_on:
       - backend
     ports:
-      - "8080:8080"
+      - "${COMPOSE_FRONTEND_PORT:-8080}:8080"
 
   backend:
     build:
@@ -15,8 +15,9 @@ services:
     depends_on:
       - postgres
     environment:
-      DATABASE_URL: postgresql://dataroom:dataroom@postgres:5432/dataroom?schema=public
-      UPLOAD_DIR: /app/uploads
+      DATABASE_URL: ${BACKEND_DATABASE_URL:-postgresql://dataroom:dataroom@postgres:5432/dataroom?schema=public}
+      PORT: ${BACKEND_PORT:-8080}
+      UPLOAD_DIR: ${UPLOAD_DIR:-/app/uploads}
     expose:
       - "8080"
     volumes:
@@ -25,11 +26,11 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_DB: dataroom
-      POSTGRES_USER: dataroom
-      POSTGRES_PASSWORD: dataroom
+      POSTGRES_DB: ${POSTGRES_DB:-dataroom}
+      POSTGRES_USER: ${POSTGRES_USER:-dataroom}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dataroom}
     ports:
-      - "5438:5432"
+      - "${COMPOSE_POSTGRES_PORT:-5438}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
 

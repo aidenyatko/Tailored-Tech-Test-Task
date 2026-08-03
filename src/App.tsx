@@ -18,13 +18,12 @@ import {
   Plus,
   Search,
   Settings,
-  Shield,
   Trash2,
   Upload,
   Users,
   X
 } from "lucide-react";
-import { ChangeEvent, MouseEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import {
   createDataroom,
   createFolder,
@@ -48,6 +47,7 @@ import {
   uploadFiles
 } from "./api/client";
 import type { AccessRecord, Dataroom, DataroomItem, DataroomRole, FileItem } from "./api/types";
+import { appConfig } from "./config";
 import { formatBytes, formatDateTime } from "./lib/format";
 
 type DialogState =
@@ -61,7 +61,6 @@ type DialogState =
   | null;
 
 type Notice = { tone: "success" | "error"; message: string } | null;
-type ContextMenuState = { x: number; y: number; dataroom: Dataroom } | null;
 type ItemTypeFilter = "ALL" | "FOLDER" | "FILE";
 type ModifiedFilter = "ALL" | "TODAY" | "WEEK" | "MONTH";
 type SortField = "name" | "owner" | "updatedAt" | "size";
@@ -79,24 +78,9 @@ export function App() {
   const [notice, setNotice] = useState<Notice>(null);
   const [viewerOpen, setViewerOpen] = useState(false);
   const [accessDialogOpen, setAccessDialogOpen] = useState(false);
-  const [contextMenu, setContextMenu] = useState<ContextMenuState>(null);
   const [typeFilter, setTypeFilter] = useState<ItemTypeFilter>("ALL");
   const [modifiedFilter, setModifiedFilter] = useState<ModifiedFilter>("ALL");
   const [sort, setSort] = useState<SortState>({ field: "name", direction: "asc" });
-
-  useEffect(() => {
-    if (!contextMenu) {
-      return;
-    }
-
-    const close = () => setContextMenu(null);
-    window.addEventListener("click", close);
-    window.addEventListener("keydown", close);
-    return () => {
-      window.removeEventListener("click", close);
-      window.removeEventListener("keydown", close);
-    };
-  }, [contextMenu]);
 
   const meQuery = useQuery({
     queryKey: ["me", token],
@@ -292,12 +276,6 @@ export function App() {
     }));
   }
 
-  function openDataroomContextMenu(event: MouseEvent, room: Dataroom) {
-    event.preventDefault();
-    selectDataroom(room);
-    setContextMenu({ x: event.clientX, y: event.clientY, dataroom: room });
-  }
-
   if (!token || !currentUser) {
     return (
       <LoginScreen
@@ -333,7 +311,6 @@ export function App() {
                     )}
                     key={room.id}
                     onClick={() => selectDataroom(room)}
-                    onContextMenu={(event) => openDataroomContextMenu(event, room)}
                     type="button"
                   >
                     <Database className="h-4 w-4 shrink-0" />
@@ -467,26 +444,6 @@ export function App() {
         </div>
       </div>
 
-      {contextMenu ? (
-        <DataroomContextMenu
-          canManageAccess={contextMenu.dataroom.role === "OWNER"}
-          menu={contextMenu}
-          onClose={() => setContextMenu(null)}
-          onDelete={() => {
-            setDialog({ type: "delete-dataroom", dataroom: contextMenu.dataroom });
-            setContextMenu(null);
-          }}
-          onManageAccess={() => {
-            setAccessDialogOpen(true);
-            setContextMenu(null);
-          }}
-          onRename={() => {
-            setDialog({ type: "rename-dataroom", dataroom: contextMenu.dataroom });
-            setContextMenu(null);
-          }}
-        />
-      ) : null}
-
       <AccessDialog
         access={accessQuery.data?.access ?? []}
         isOpen={accessDialogOpen}
@@ -580,16 +537,16 @@ function LoginScreen({ notice, onLogin, onRegister }: {
 }) {
   const [mode, setMode] = useState<"login" | "register">("login");
   const [name, setName] = useState("New User");
-  const [email, setEmail] = useState("owner@acme.test");
-  const [password, setPassword] = useState("owner123");
+  const [email, setEmail] = useState(appConfig.defaultLoginEmail);
+  const [password, setPassword] = useState(appConfig.defaultLoginPassword);
   const isRegister = mode === "register";
 
   function switchMode(nextMode: "login" | "register") {
     setMode(nextMode);
 
     if (nextMode === "login") {
-      setEmail("owner@acme.test");
-      setPassword("owner123");
+      setEmail(appConfig.defaultLoginEmail);
+      setPassword(appConfig.defaultLoginPassword);
       return;
     }
 
@@ -629,7 +586,7 @@ function LoginScreen({ notice, onLogin, onRegister }: {
         </button>
         {!isRegister ? (
           <div className="mt-5 text-xs leading-6 text-ghost/60">
-          Demo accounts: owner@acme.test / owner123, editor@acme.test / editor123, viewer@acme.test / viewer123.
+          {appConfig.demoAccountsText}
           </div>
         ) : null}
         {notice ? <div className={classNames("mt-4 rounded-2xl border p-3 text-sm", notice.tone === "error" ? "border-danger bg-danger/10 text-red-200" : "border-neon-cyan/40 bg-neon-cyan/10 text-neon-cyan")}>{notice.message}</div> : null}
@@ -902,40 +859,6 @@ function AccessDialog(props: {
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
-  );
-}
-
-function DataroomContextMenu(props: {
-  menu: NonNullable<ContextMenuState>;
-  canManageAccess: boolean;
-  onManageAccess: () => void;
-  onRename: () => void;
-  onDelete: () => void;
-  onClose: () => void;
-}) {
-  return (
-    <div
-      className="fixed z-50 w-56 rounded-3xl border border-neon-cyan/25 bg-panel p-2 shadow-panel"
-      onClick={(event) => event.stopPropagation()}
-      style={{ left: props.menu.x, top: props.menu.y }}
-    >
-      <button className="flex w-full items-center gap-3 rounded-2xl px-3 py-2 text-left text-sm text-neon-yellow hover:bg-neon-yellow/10 disabled:opacity-45" disabled={!props.canManageAccess} onClick={props.onManageAccess} type="button">
-        <Shield className="h-4 w-4" />
-        Manage access
-      </button>
-      <button className="flex w-full items-center gap-3 rounded-2xl px-3 py-2 text-left text-sm hover:bg-neon-cyan/10" onClick={props.onRename} type="button">
-        <Pencil className="h-4 w-4" />
-        Rename
-      </button>
-      <button className="flex w-full items-center gap-3 rounded-2xl px-3 py-2 text-left text-sm text-red-300 hover:bg-danger/10" onClick={props.onDelete} type="button">
-        <Trash2 className="h-4 w-4" />
-        Delete
-      </button>
-      <button className="mt-1 flex w-full items-center gap-3 rounded-2xl px-3 py-2 text-left text-sm text-ghost/60 hover:bg-ghost/10" onClick={props.onClose} type="button">
-        <X className="h-4 w-4" />
-        Close
-      </button>
-    </div>
   );
 }
 
