@@ -67,6 +67,20 @@ Stop and remove containers/volumes:
 docker compose down -v
 ```
 
+## Hosted URL
+
+The task recommends Vercel for the hosted URL, but this implementation intentionally does not use Vercel for the submitted MVP.
+
+Why:
+
+- the app is not only a static frontend; it includes a NestJS backend;
+- PostgreSQL is required for users, sessions, roles, folders, file metadata, and search index data;
+- PDF blobs need persistent storage;
+- the backend runs Prisma migrations before startup;
+- Docker Compose gives a reproducible end-to-end environment with frontend, backend, database, and blob volume in one command.
+
+Vercel would be a good fit for the frontend part. For this architecture, a production deployment would split hosting: frontend on Vercel, backend on Render/Railway/Fly.io, PostgreSQL on Neon/Supabase/Railway, and PDF blobs in S3-compatible storage. For the test task, Docker Compose is kept as the clearest way to verify the complete system locally.
+
 ## Local Checks
 
 On Windows PowerShell, use `npm.cmd` if `npm` is blocked by execution policy.
@@ -86,6 +100,8 @@ See [docs/API.md](docs/API.md).
 ## Decisions
 
 See [docs/DECISIONS.md](docs/DECISIONS.md).
+
+The decisions document also includes an `AI Usage` section that explains where AI helped during the work and which parts were still reviewed, selected, and validated manually.
 
 ## Manual Test Cases
 

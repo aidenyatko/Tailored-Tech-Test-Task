@@ -114,6 +114,38 @@ Trade-off:
 
 The browser still talks to one origin, `http://localhost:8080`, because nginx proxies API requests. This avoids CORS complexity while keeping Docker services split internally.
 
+## Vercel Hosting Decision
+
+The task recommends Vercel for the hosted URL, but the MVP is submitted as a Docker Compose full-stack application instead of a Vercel deployment.
+
+Why:
+
+Vercel is strongest when the application is a static frontend, a Next.js application, or serverless API functions. This project is intentionally shaped as a complete data-room system with a dedicated backend, relational database, and blob storage. The backend is not just a thin mock API: it owns authentication, authorization, folder/file mutations, PDF upload handling, file streaming, text indexing, and Prisma migrations.
+
+Using Vercel alone would leave several important parts outside the platform:
+
+- PostgreSQL needs a managed database provider;
+- uploaded PDF blobs need persistent object storage;
+- NestJS needs a stable backend runtime;
+- Prisma migrations need a controlled deployment step;
+- file streaming should remain behind backend authorization checks.
+
+How this should be hosted in production:
+
+- frontend on Vercel;
+- backend on Render, Railway, Fly.io, or another Node.js service host;
+- PostgreSQL on Neon, Supabase, Railway, or another managed Postgres provider;
+- PDF blobs in S3-compatible storage;
+- environment variables shared between frontend and backend for API routing and auth configuration.
+
+Why Docker Compose is used for this submission:
+
+Docker Compose keeps the whole system reproducible from one command. It starts the frontend, backend, PostgreSQL, migrations, seeded demo users, and local blob volume together. That makes review easier because the evaluator can run the complete end-to-end product locally without wiring several external services first.
+
+Trade-off:
+
+The submission does not provide a public hosted URL. The benefit is that the delivered MVP is self-contained and easier to verify consistently. If a public demo is required, the architecture is ready to split across Vercel plus managed backend/database/blob providers.
+
 ## Authentication
 
 Authentication is email/password with server-side sessions.
@@ -411,6 +443,36 @@ Manual checks:
 Why:
 
 Automated tests catch regressions quickly. Manual browser checks catch integration and layout issues that unit tests often miss.
+
+## AI Usage
+
+AI was used as a development assistant during the task, not as an unchecked replacement for engineering ownership.
+
+Where AI helped:
+
+- breaking the requirements into smaller implementation steps;
+- drafting parts of the React and NestJS code;
+- suggesting edge cases for folders, files, access roles, upload, search, and filtering;
+- drafting documentation structure for README, API notes, decisions, and manual test cases;
+- helping investigate failures during PDF upload and text indexing;
+- supporting manual QA planning before browser walkthroughs.
+
+How the output was controlled:
+
+- architecture choices were reviewed against the actual product requirements;
+- generated code was inspected and adjusted to fit the existing project structure;
+- backend behavior was validated with automated tests and API checks;
+- frontend behavior was validated with browser walkthroughs;
+- documentation was rewritten to match the implemented product instead of leaving generic AI wording;
+- final GitFlow steps were gated by GitHub Actions on feature branches, `dev`, and `master`.
+
+Why this approach:
+
+The task explicitly allowed AI usage. The useful part of AI here was speed: it helped produce drafts, alternatives, and checklists faster. The important engineering work was still deciding which suggestions fit the MVP, removing weak or non-working ideas, testing the result, and documenting the final behavior clearly.
+
+Trade-off:
+
+AI can produce plausible but incorrect implementation details, so it was not treated as a source of truth. The source of truth is the running application, automated checks, manual browser verification, and the code committed to the repository.
 
 ## CI and GitFlow
 
