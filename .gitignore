@@ -12,3 +12,4 @@ server-data
 *.tsbuildinfo
 playwright-report
 test-results
+.vercel
