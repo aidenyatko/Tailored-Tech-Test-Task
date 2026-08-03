@@ -1,6 +1,7 @@
 import type { AccessRecord, Dataroom, DataroomItem, DataroomRole, FileItem, User } from "./types";
 
 type MockState = {
+  version?: number;
   users: User[];
   datarooms: Dataroom[];
   items: DataroomItem[];
@@ -8,13 +9,14 @@ type MockState = {
 };
 
 const STATE_KEY = "acme-dataroom-demo-state";
+const STATE_VERSION = 2;
 const TOKEN_PREFIX = "mock-token:";
-const DEMO_PDF_URL = "data:application/pdf;base64,JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2JqCjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2JqCjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3ggWzAgMCA2MTIgNzkyXSA+PgplbmRvYmoKeHJlZgowIDQKMDAwMDAwMDAwMCA2NTUzNSBmIAowMDAwMDAwMDA5IDAwMDAwIG4gCjAwMDAwMDAwNTggMDAwMDAgbiAKMDAwMDAwMDExNSAwMDAwMCBuIAp0cmFpbGVyCjw8IC9Sb290IDEgMCBSIC9TaXplIDQgPj4Kc3RhcnR4cmVmCjE5OQolJUVPRgo=";
+const DEMO_RESUME_URL = "/demo/Dmytro_Kiselov_Full-Stack_Developer.pdf";
 
 const objectUrls = new Map<string, string>();
 
 export function fileContentUrl(itemId: string) {
-  return objectUrls.get(itemId) ?? DEMO_PDF_URL;
+  return objectUrls.get(itemId) ?? DEMO_RESUME_URL;
 }
 
 export async function login(email: string, password: string) {
@@ -288,7 +290,11 @@ function loadState(): MockState {
   const stored = localStorage.getItem(STATE_KEY);
 
   if (stored) {
-    return JSON.parse(stored) as MockState;
+    const state = JSON.parse(stored) as MockState;
+
+    if (state.version === STATE_VERSION) {
+      return state;
+    }
   }
 
   const state = seedState();
@@ -315,55 +321,34 @@ function seedState(): MockState {
     createdAt: now,
     updatedAt: now
   };
-  const legal: DataroomItem = {
-    id: "folder-legal",
+  const resumeFolder: DataroomItem = {
+    id: "folder-candidate-cv",
     dataroomId: room.id,
     parentId: null,
     type: "FOLDER",
-    name: "Legal",
+    name: "Candidate CV",
     createdAt: now,
     updatedAt: now
   };
-  const finance: DataroomItem = {
-    id: "folder-finance",
+  const fullStackResume: FileItem = {
+    id: "file-dmytro-full-stack-resume",
     dataroomId: room.id,
-    parentId: null,
-    type: "FOLDER",
-    name: "Finance",
-    createdAt: now,
-    updatedAt: now
-  };
-  const nda: FileItem = {
-    id: "file-nda",
-    dataroomId: room.id,
-    parentId: legal.id,
+    parentId: resumeFolder.id,
     type: "FILE",
-    name: "Acme NDA.pdf",
+    name: "Dmytro_Kiselov_Full-Stack_Developer.pdf",
     mimeType: "application/pdf",
-    size: 124000,
-    blobKey: "demo-nda.pdf",
-    searchText: "nda confidentiality acquisition legal due diligence agreement",
-    createdAt: now,
-    updatedAt: now
-  };
-  const revenue: FileItem = {
-    id: "file-revenue",
-    dataroomId: room.id,
-    parentId: finance.id,
-    type: "FILE",
-    name: "Revenue Summary.pdf",
-    mimeType: "application/pdf",
-    size: 238000,
-    blobKey: "demo-revenue.pdf",
-    searchText: "revenue summary finance forecast growth acquisition",
+    size: 88533,
+    blobKey: DEMO_RESUME_URL,
+    searchText: "dmytro kiselov full-stack developer react typescript node nestjs postgresql docker ai qa backend frontend",
     createdAt: now,
     updatedAt: now
   };
 
   return {
+    version: STATE_VERSION,
     users: [owner, editor, viewer],
     datarooms: [room],
-    items: [legal, finance, nda, revenue],
+    items: [resumeFolder, fullStackResume],
     access: [
       { id: "access-owner", dataroomId: room.id, userId: owner.id, role: "OWNER", user: owner },
       { id: "access-editor", dataroomId: room.id, userId: editor.id, role: "EDITOR", user: editor },

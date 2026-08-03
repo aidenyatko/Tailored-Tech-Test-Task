@@ -107,6 +107,8 @@ Why:
 
 For production, the app should be split: frontend on Vercel, backend on Render/Railway/Fly.io, PostgreSQL on Neon/Supabase/Railway, and PDF blobs in S3-compatible storage. For the test task, Docker Compose is kept as the clearest way to verify the complete backend system locally, while Vercel can host the mock-data demo.
 
+The Vercel mock demo starts with one folder, `Candidate CV`, and one real static PDF file: `Dmytro_Kiselov_Full-Stack_Developer.pdf`.
+
 ## Local Checks
 
 On Windows PowerShell, use `npm.cmd` if `npm` is blocked by execution policy.

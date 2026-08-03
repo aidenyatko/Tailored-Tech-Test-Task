@@ -136,6 +136,7 @@ How the submitted hosting is split:
 - Docker Compose runs the real end-to-end system locally;
 - Vercel runs the frontend with `VITE_DEMO_MODE=mock`;
 - mock mode keeps data in browser storage and demonstrates the UX without external services.
+- the mock seed contains one folder, `Candidate CV`, with one real static PDF: `Dmytro_Kiselov_Full-Stack_Developer.pdf`.
 
 How this should be hosted in production:
 
