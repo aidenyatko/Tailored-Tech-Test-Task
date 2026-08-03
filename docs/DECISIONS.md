@@ -506,8 +506,7 @@ This gives clear checkpoints and keeps `master` as the final stable branch.
 How:
 
 - GitHub Actions runs lint, typecheck, tests, and build.
-- CI runs for `master`, `dev`, `feature/**`, `fix/**`, and `codex/**`.
-- `codex/**` was added because Codex-created branches use that prefix.
+- CI runs for `master`, `dev`, `feature/**`, and `fix/**`.
 
 Trade-off:
 
